@@ -16,6 +16,13 @@ type LoginRequest struct {
 	Password string `json:"password"`
 }
 
+type ChangePasswordRequest struct {
+    OldPassword string `json:"old_password"`
+    NewPassword string `json:"new_password"`
+}
+
+
 type LoginResponse struct {
 	User *models.User `json:"user"`
 }
+

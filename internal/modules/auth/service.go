@@ -13,6 +13,9 @@ type AuthService interface {
 	Register(req RegisterRequest) (*models.User, error)
 	Login(req LoginRequest) (*LoginResponse, string, string, error)
 	Refresh(refreshToken string) (*LoginResponse, string, string, error)
+	GetUserByID(id uint) (*models.User, error) // NEW
+    ChangePassword(userID uint, req ChangePasswordRequest) error
+
 }
 
 type authService struct {
@@ -24,7 +27,6 @@ func NewAuthService(repo AuthRepository) AuthService {
 }
 
 func (s *authService) Register(req RegisterRequest) (*models.User, error) {
-
 	// 1. Validation: all fields required
 	if req.FullName == "" || req.Username == "" || req.Email == "" || req.Phone == "" || req.Password == "" {
 		return nil, errors.New("semua field harus diisi")
@@ -146,5 +148,55 @@ func (s *authService) Refresh(refreshToken string) (*LoginResponse, string, stri
     return &LoginResponse{
         User: user,
     }, access, refresh, nil
+}
+
+func (s *authService) GetUserByID(id uint) (*models.User, error) {
+    user, err := s.repo.FindByID(id)
+    if err != nil {
+        return nil, errors.New("user tidak ditemukan")
+    }
+    return user, nil
+}
+
+func (s *authService) ChangePassword(userID uint, req ChangePasswordRequest) error {
+
+    // 1. Ambil user
+    user, err := s.repo.FindByID(userID)
+    if err != nil {
+        return errors.New("user tidak ditemukan")
+    }
+
+    // 2. Validate old password
+    if !hash.CheckPassword(req.OldPassword, user.Password) {
+        return errors.New("password lama salah")
+    }
+
+    // 3. Validasi password baru
+    //    — minimal 8 karakter
+    //    — harus ada huruf (A–Z / a–z)
+    //    — harus ada angka (0–9)
+    if len(req.NewPassword) < 8 {
+        return errors.New("password baru minimal 8 karakter")
+    }
+
+    hasLetter := regexp.MustCompile(`[A-Za-z]`).MatchString(req.NewPassword)
+    hasDigit := regexp.MustCompile(`\d`).MatchString(req.NewPassword)
+
+    if !hasLetter || !hasDigit {
+        return errors.New("password baru harus mengandung huruf dan angka")
+    }
+
+    // 4. Hash new password
+    hashed, err := hash.HashPassword(req.NewPassword)
+    if err != nil {
+        return errors.New("gagal menghash password baru")
+    }
+
+    // 5. Update password
+    if err := s.repo.UpdatePassword(user.ID, hashed); err != nil {
+        return errors.New("gagal update password")
+    }
+
+    return nil
 }
 

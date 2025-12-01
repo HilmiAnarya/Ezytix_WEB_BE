@@ -21,6 +21,7 @@ type AuthRepository interface {
 
 	// Create user
 	CreateUser(user *models.User) error
+	UpdatePassword(userID uint, hashedPassword string) error
 }
 
 type authRepository struct {
@@ -93,3 +94,8 @@ func (r *authRepository) FindByUsername(username string) (*models.User, error) {
 	return &user, err
 }
 
+func (r *authRepository) UpdatePassword(userID uint, hashedPassword string) error {
+    return r.db.Model(&models.User{}).
+        Where("id = ?", userID).
+        Update("password", hashedPassword).Error
+}

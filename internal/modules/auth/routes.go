@@ -22,4 +22,6 @@ func AuthRegisterRoutes(app *fiber.App, db *gorm.DB) {
 
 	authProtected.Get("/me", h.Me)
 	authProtected.Post("/logout", h.Logout)
+	authProtected.Post("/change-password", h.ChangePassword)
+
 }

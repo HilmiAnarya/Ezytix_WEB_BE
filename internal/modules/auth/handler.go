@@ -119,8 +119,16 @@ func (h *AuthHandler) Refresh(c *fiber.Ctx) error {
 
 
 func (h *AuthHandler) Me(c *fiber.Ctx) error {
-	claims := c.Locals("user").(*jwt.JWTClaims)
-	return c.JSON(claims)
+    claims := c.Locals("user").(*jwt.JWTClaims)
+
+    user, err := h.service.GetUserByID(uint(claims.UserID))
+    if err != nil {
+        return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+            "error": "user tidak ditemukan",
+        })
+    }
+
+    return c.JSON(user)
 }
 
 func (h *AuthHandler) Logout(c *fiber.Ctx) error {
@@ -128,4 +136,28 @@ func (h *AuthHandler) Logout(c *fiber.Ctx) error {
 	c.Cookie(&fiber.Cookie{Name: "refresh_token", Value: "", MaxAge: -1, Path: "/"})
 
 	return c.JSON(fiber.Map{"message": "logged out"})
+}
+
+func (h *AuthHandler) ChangePassword(c *fiber.Ctx) error {
+    var req ChangePasswordRequest
+
+    if err := c.BodyParser(&req); err != nil {
+        return c.Status(400).JSON(fiber.Map{"error": "invalid request"})
+    }
+
+    // Ambil user ID dari JWT (middleware sudah set)
+    claims := c.Locals("user").(*jwt.JWTClaims)
+    userID := claims.UserID
+
+    if err := h.service.ChangePassword(userID, req); err != nil {
+        return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+    }
+
+    // Auto logout (frontend redirect)
+    c.Cookie(&fiber.Cookie{Name: "access_token", Value: "", MaxAge: -1, Path: "/"})
+    c.Cookie(&fiber.Cookie{Name: "refresh_token", Value: "", MaxAge: -1, Path: "/"})
+
+    return c.JSON(fiber.Map{
+        "message": "password changed successfully. please login again",
+    })
 }
