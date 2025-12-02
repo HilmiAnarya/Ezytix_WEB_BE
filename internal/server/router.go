@@ -2,28 +2,34 @@ package server
 
 import (
 	"ezytix-be/internal/handlers"
-	//"ezytix-be/internal/middleware"
 	"ezytix-be/internal/modules/auth"
+	"ezytix-be/internal/modules/airport"
+	"ezytix-be/internal/middleware"
 
 	"github.com/gofiber/contrib/websocket"
 )
 
 func (s *FiberServer) RegisterRoutes() {
+
+	// BASIC ROUTES
 	s.Get("/", handlers.Home)
 	s.Get("/health", handlers.Health)
 	s.Get("/ws", websocket.New(handlers.Websocket))
 
-	// auth module
+	// ================================
+	// AUTH MODULE
+	// ================================
 	auth.AuthRegisterRoutes(s.App, s.DB.GetGORMDB())
 
-	// admin := s.App.Group("/api/v1/admin")
+	// ================================
+	// AIRPORT MODULE
+	// ================================
+	airport.AirportRegisterRoutes(s.App, s.DB.GetGORMDB())
 
-	// // Middleware autentikasi dulu
-	// admin.Use(middleware.JWTMiddleware)
-
-	// // Middleware role authorization
-	// admin.Use(middleware.RequireRole("admin"))
-
-	// // Endpoint dummy dashboard
-	// //admin.Get("/dashboard", handlers.AdminDashboard)
+	// ================================
+	// ADMIN ROUTES 
+	// ================================
+	admin := s.App.Group("/api/v1/admin")
+	admin.Use(middleware.JWTMiddleware)
+	admin.Use(middleware.RequireRole("admin"))
 }
