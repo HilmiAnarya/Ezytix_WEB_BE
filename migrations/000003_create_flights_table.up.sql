@@ -13,8 +13,6 @@ CREATE TABLE flights (
     transit_count        INT NOT NULL DEFAULT 0,
     transit_info         VARCHAR(255),         -- opsional
 
-    base_price           NUMERIC(15,2) NOT NULL,
-
     deleted_at           TIMESTAMP NULL,
     created_at           TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at           TIMESTAMP NOT NULL DEFAULT NOW()

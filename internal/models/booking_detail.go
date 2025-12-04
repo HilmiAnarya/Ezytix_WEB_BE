@@ -1,11 +1,11 @@
 package models
 
-type FlightClass string
-const (
-	Economy     FlightClass = "economy"
-	Business    FlightClass = "business"
-	FirstClass  FlightClass = "first_class"
-)
+// type FlightClass string
+// const (
+// 	Economy     FlightClass = "economy"
+// 	Business    FlightClass = "business"
+// 	FirstClass  FlightClass = "first_class"
+// )
 
 type BookingDetail struct {
 	ID         uint `json:"id" gorm:"primaryKey;autoIncrement"`
