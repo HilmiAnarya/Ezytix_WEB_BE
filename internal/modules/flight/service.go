@@ -12,6 +12,9 @@ type FlightService interface {
 	GetFlightByID(id uint) (*models.Flight, error)
 	UpdateFlight(id uint, req CreateFlightRequest) (*models.Flight, error)
 	DeleteFlight(id uint) error
+
+	// [NEW] Search Interface
+	SearchFlights(req SearchFlightRequest) ([]models.Flight, error)
 }
 
 type flightService struct {
@@ -78,21 +81,20 @@ func (s *flightService) CreateFlight(req CreateFlightRequest) (*models.Flight, e
 	}
 	flight.FlightLegs = legs
 
-	// 5. Mapping Classes
+	// Map Classes (UPDATED: Include TotalSeats)
 	var classes []models.FlightClass
 	for _, classReq := range req.Classes {
 		classes = append(classes, models.FlightClass{
-			SeatClass: classReq.SeatClass,
-			Price:     classReq.Price,
+			SeatClass:  classReq.SeatClass,
+			Price:      classReq.Price,
+			TotalSeats: classReq.TotalSeats, // <--- PENTING: Mapping Stok
 		})
 	}
 	flight.FlightClasses = classes
 
-	// 6. Save
 	if err := s.repo.CreateFlight(flight); err != nil {
 		return nil, err
 	}
-
 	return flight, nil
 }
 
@@ -126,13 +128,7 @@ func (s *flightService) UpdateFlight(id uint, req CreateFlightRequest) (*models.
 		return nil, errors.New("arrival time must be after departure time")
 	}
 
-	// AUTO-CALCULATE (UPDATE)
-	// Kita hitung ulang berdasarkan legs baru yang dikirim Admin
-	transitCount := len(req.Legs) - 1
-	if transitCount < 0 {
-		transitCount = 0
-	}
-
+	// Update Header Fields
 	existingFlight.FlightCode = req.FlightCode
 	existingFlight.AirlineName = req.AirlineName
 	existingFlight.OriginAirportID = req.OriginAirportID
@@ -140,13 +136,11 @@ func (s *flightService) UpdateFlight(id uint, req CreateFlightRequest) (*models.
 	existingFlight.DepartureTime = req.DepartureTime
 	existingFlight.ArrivalTime = req.ArrivalTime
 	existingFlight.TotalDuration = req.TotalDuration
-	
-	// UPDATE FIELD TRANSIT COUNT
-	existingFlight.TransitCount = transitCount
-	
+	existingFlight.TransitCount = len(req.Legs) - 1
+	if existingFlight.TransitCount < 0 { existingFlight.TransitCount = 0 }
 	existingFlight.TransitInfo = req.TransitInfo
 
-	// Mapping Legs (Full Replace logic)
+	// Update Legs (Full Replace)
 	var newLegs []models.FlightLeg
 	for _, legReq := range req.Legs {
 		newLegs = append(newLegs, models.FlightLeg{
@@ -166,12 +160,13 @@ func (s *flightService) UpdateFlight(id uint, req CreateFlightRequest) (*models.
 	}
 	existingFlight.FlightLegs = newLegs
 
-	// Mapping Classes
+	// Update Classes (Full Replace & UPDATED Mapping)
 	var newClasses []models.FlightClass
 	for _, classReq := range req.Classes {
 		newClasses = append(newClasses, models.FlightClass{
-			SeatClass: classReq.SeatClass,
-			Price:     classReq.Price,
+			SeatClass:  classReq.SeatClass,
+			Price:      classReq.Price,
+			TotalSeats: classReq.TotalSeats, // <--- PENTING: Mapping Stok
 		})
 	}
 	existingFlight.FlightClasses = newClasses
@@ -179,7 +174,6 @@ func (s *flightService) UpdateFlight(id uint, req CreateFlightRequest) (*models.
 	if err := s.repo.UpdateFlight(existingFlight); err != nil {
 		return nil, err
 	}
-
 	return existingFlight, nil
 }
 
@@ -194,4 +188,20 @@ func (s *flightService) DeleteFlight(id uint) error {
 	}
 
 	return s.repo.DeleteFlight(id)
+}
+
+// [NEW] SEARCH FLIGHTS
+func (s *flightService) SearchFlights(req SearchFlightRequest) ([]models.Flight, error) {
+	// 1. Validasi Input Dasar
+	if req.OriginAirportID == 0 || req.DestinationAirportID == 0 || req.DepartureDate == "" {
+		return nil, errors.New("origin, destination, and date are required")
+	}
+
+	// 2. Set Default Values jika user tidak kirim
+	if req.PassengerCount <= 0 {
+		req.PassengerCount = 1 // Minimal cari untuk 1 orang
+	}
+	// Note: SeatClass boleh kosong jika user mau lihat semua kelas
+
+	return s.repo.SearchFlights(req)
 }

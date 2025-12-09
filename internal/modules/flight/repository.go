@@ -11,6 +11,9 @@ type FlightRepository interface {
 	GetFlightByID(id uint) (*models.Flight, error)
 	UpdateFlight(flight *models.Flight) error
 	DeleteFlight(id uint) error
+
+	// [NEW] Search dengan filter lengkap
+	SearchFlights(req SearchFlightRequest) ([]models.Flight, error)
 }
 
 type flightRepository struct {
@@ -100,4 +103,51 @@ func (r *flightRepository) DeleteFlight(id uint) error {
 		}
 		return nil
 	})
+}
+
+func (r *flightRepository) SearchFlights(req SearchFlightRequest) ([]models.Flight, error) {
+	var flights []models.Flight
+
+	// Start Query dari Model Flight
+	query := r.db.Model(&models.Flight{}).
+		Preload("FlightLegs"). // Selalu load rute transit
+		Joins("JOIN flight_classes ON flight_classes.flight_id = flights.id") // Join wajib untuk filter kelas
+
+	// 1. Filter Rute (Origin & Destination)
+	if req.OriginAirportID != 0 {
+		query = query.Where("flights.origin_airport_id = ?", req.OriginAirportID)
+	}
+	if req.DestinationAirportID != 0 {
+		query = query.Where("flights.destination_airport_id = ?", req.DestinationAirportID)
+	}
+
+	// 2. Filter Tanggal (Departure Date)
+	// Kita casting timestamp ke date agar jam diabaikan (User cuma pilih tgl 8 Okt)
+	if req.DepartureDate != "" {
+		query = query.Where("DATE(flights.departure_time) = ?", req.DepartureDate)
+	}
+
+	// 3. Filter Kelas Kabin (Seat Class)
+	if req.SeatClass != "" {
+		query = query.Where("flight_classes.seat_class = ?", req.SeatClass)
+	}
+
+	// 4. Filter Ketersediaan Kursi (Passenger Count)
+	if req.PassengerCount > 0 {
+		query = query.Where("flight_classes.total_seats >= ?", req.PassengerCount)
+	}
+
+	// 5. Preload Classes yang relevan saja
+	// Trik UX: Jika user cari "Business", jangan load harga "Economy" biar response bersih.
+	// Jika user tidak filter kelas, tampilkan semua.
+	if req.SeatClass != "" {
+		query = query.Preload("FlightClasses", "seat_class = ?", req.SeatClass)
+	} else {
+		query = query.Preload("FlightClasses")
+	}
+
+	// 6. Eksekusi (Pakai Distinct karena Join bisa bikin duplikat row flight)
+	err := query.Distinct("flights.*").Find(&flights).Error
+
+	return flights, err
 }

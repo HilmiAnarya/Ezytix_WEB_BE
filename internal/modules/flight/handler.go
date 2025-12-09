@@ -48,7 +48,26 @@ func (h *FlightHandler) CreateFlight(c *fiber.Ctx) error {
 // ================================================
 // 2. GET ALL FLIGHTS (GET)
 // ================================================
+// GET ALL FLIGHTS (Smart Endpoint: Search or List)
 func (h *FlightHandler) GetAllFlights(c *fiber.Ctx) error {
+	var req SearchFlightRequest
+	
+	// Parsing Query Param: ?origin=1&destination=2&date=2025-10-08&seat_class=economy&passengers=1
+	if err := c.QueryParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid query params"})
+	}
+
+	// DETEKSI MODE: Apakah ini pencarian?
+	// Syarat search: Harus ada Origin, Destination, dan Date.
+	if req.OriginAirportID != 0 && req.DestinationAirportID != 0 && req.DepartureDate != "" {
+		flights, err := h.service.SearchFlights(req)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.JSON(fiber.Map{"data": flights})
+	}
+
+	// MODE DEFAULT: Get All (Untuk Admin list / Debugging)
 	flights, err := h.service.GetAllFlights()
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
