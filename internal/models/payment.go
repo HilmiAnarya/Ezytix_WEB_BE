@@ -1,0 +1,38 @@
+package models
+
+import "time"
+
+const (
+	PaymentStatusPending = "PENDING"
+	PaymentStatusPaid    = "PAID"
+	PaymentStatusExpired = "EXPIRED"
+	PaymentStatusFailed  = "FAILED"
+)
+
+type Payment struct {
+	ID uint `json:"id" gorm:"primaryKey;autoIncrement"`
+
+	// Relasi Logis
+	OrderID string `json:"order_id" gorm:"size:50;not null;index"`
+
+	// Xendit Data
+	XenditID      string `json:"xendit_id" gorm:"size:100;index"`
+	PaymentMethod string `json:"payment_method" gorm:"size:50;default:'QRIS'"`
+	PaymentStatus string `json:"payment_status" gorm:"size:20;default:'PENDING';not null"`
+
+	// Financial Data
+	Amount   float64 `json:"amount" gorm:"type:numeric(15,2);not null"`
+	Currency string  `json:"currency" gorm:"size:3;default:'IDR'"`
+
+	// Frontend Data (QR String / URL)
+	PaymentURL string `json:"payment_url" gorm:"type:text"`
+
+	// Timestamps
+	PaidAt    *time.Time `json:"paid_at"` // Pointer agar bisa null
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
+}
+
+func (Payment) TableName() string {
+	return "payments"
+}

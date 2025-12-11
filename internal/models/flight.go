@@ -7,8 +7,13 @@ type Flight struct {
 	ID                    uint         `json:"id" gorm:"primaryKey;autoIncrement"`
 	FlightCode            string       `json:"flight_code" gorm:"unique;not null"`
 	AirlineName           string       `json:"airline_name" gorm:"not null"`
-	OriginAirportID       uint         `json:"origin_airport_id"`
-	DestinationAirportID  uint         `json:"destination_airport_id"`
+	// Foreign Keys & Relations (PENTING UNTUK PRELOAD)
+	OriginAirportID      uint    `json:"origin_airport_id"`
+	OriginAirport        Airport `json:"origin_airport" gorm:"foreignKey:OriginAirportID"` // <--- TAMBAH INI
+
+	DestinationAirportID uint    `json:"destination_airport_id"`
+	DestinationAirport   Airport `json:"destination_airport" gorm:"foreignKey:DestinationAirportID"` // <--- TAMBAH INI
+	
 	DepartureTime         time.Time    `json:"departure_time" gorm:"not null"`
 	ArrivalTime           time.Time    `json:"arrival_time" gorm:"not null"`
 	TotalDuration         string       `json:"total_duration" gorm:"not null"`

@@ -40,7 +40,15 @@ func (r *flightRepository) GetAllFlights() ([]models.Flight, error) {
 // READ ONE (With Relations)
 func (r *flightRepository) GetFlightByID(id uint) (*models.Flight, error) {
 	var flight models.Flight
-	err := r.db.Preload("FlightLegs").Preload("FlightClasses").First(&flight, id).Error
+	
+	// Tambahkan Preload OriginAirport dan DestinationAirport
+	err := r.db.
+		Preload("FlightLegs").
+		Preload("FlightClasses").
+		Preload("OriginAirport").      // <--- NEW: Agar CityName bisa diambil
+		Preload("DestinationAirport"). // <--- NEW
+		First(&flight, id).Error
+	
 	if err != nil {
 		return nil, err
 	}

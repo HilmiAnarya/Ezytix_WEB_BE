@@ -1,26 +1,27 @@
 CREATE TABLE payments (
     id              SERIAL PRIMARY KEY,
     
-    -- Terhubung ke Booking via Order ID
+    -- [THE GLUE] Terhubung ke Booking via Order ID
     order_id        VARCHAR(50) NOT NULL, 
     
-    -- Xendit Reference
-    xendit_id       VARCHAR(100), -- ID dari Xendit (misal: invoice_id)
+    -- [XENDIT INFO]
+    xendit_id       VARCHAR(100), -- Invoice ID dari Xendit (Penting untuk Webhook)
     payment_method  VARCHAR(50) DEFAULT 'QRIS',
-    payment_status  VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    payment_status  VARCHAR(20) NOT NULL DEFAULT 'PENDING', -- PENDING, PAID, EXPIRED, FAILED
     
-    -- Data Uang
+    -- [TRANSACTION INFO]
     amount          NUMERIC(15,2) NOT NULL,
     currency        VARCHAR(3) DEFAULT 'IDR',
     
-    -- Data untuk Frontend (QR Code / Redirect Link)
+    -- [FRONTEND INFO] QR String / Redirect URL
     payment_url     TEXT, 
     
-    paid_at         TIMESTAMP,
+    paid_at         TIMESTAMP, -- Kapan user bayar (diisi saat Webhook)
+    
     created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
--- Index agar pencarian status pembayaran cepat
+-- Index agar pencarian cepat saat Webhook masuk
 CREATE INDEX idx_payments_order_id ON payments(order_id);
 CREATE INDEX idx_payments_xendit_id ON payments(xendit_id);
