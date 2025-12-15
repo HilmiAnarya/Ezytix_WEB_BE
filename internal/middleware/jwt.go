@@ -7,7 +7,6 @@ import (
 )
 
 func JWTMiddleware(c *fiber.Ctx) error {
-	// Ambil access token dari cookie
 	token := c.Cookies("access_token")
 	if token == "" {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
@@ -22,7 +21,6 @@ func JWTMiddleware(c *fiber.Ctx) error {
 		})
 	}
 
-	// Simpan user claims untuk dipakai handler
 	c.Locals("user", claims)
 
 	return c.Next()

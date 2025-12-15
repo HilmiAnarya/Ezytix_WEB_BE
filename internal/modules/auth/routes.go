@@ -16,7 +16,6 @@ func AuthRegisterRoutes(app *fiber.App, db *gorm.DB) {
 	auth.Post("/login", h.Login)
 	auth.Post("/refresh", h.Refresh)
 
-	// Protected
 	authProtected := auth.Group("/")
 	authProtected.Use(middleware.JWTMiddleware)
 

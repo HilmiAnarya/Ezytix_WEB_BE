@@ -17,7 +17,6 @@ func RequireRole(allowedRoles ...string) fiber.Handler {
 
 		userRole := claims.Role
 
-		// Check if user role is allowed
 		for _, role := range allowedRoles {
 			if role == userRole {
 				return c.Next()

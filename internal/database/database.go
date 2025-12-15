@@ -39,7 +39,6 @@ func New() Service {
 		log.Fatal("Failed to connect DB:", err)
 	}
 
-	// Ping database untuk memastikan koneksi hidup
 	if err := db.Ping(); err != nil {
 		log.Fatal("Failed to ping DB:", err)
 	}

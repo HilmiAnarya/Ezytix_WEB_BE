@@ -21,11 +21,9 @@ func main() {
 	srv := server.New()
 	srv.RegisterRoutes()
 
-	// CHANNEL UNTUK SIGNAL
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
 
-	// RUN SERVER DALAM GOROUTINE
 	go func() {
 		log.Printf("Server running on port %s", config.AppConfig.Port)
 		if err := srv.Listen(":" + config.AppConfig.Port); err != nil {
@@ -33,11 +31,9 @@ func main() {
 		}
 	}()
 
-	// TUNGGU SIGNAL
 	<-signalChan
 	log.Println("Received shutdown signal...")
 
-	// GRACEFUL SHUTDOWN WITH TIMEOUT
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -45,7 +41,6 @@ func main() {
 		log.Println("Forced shutdown:", err)
 	}
 
-	// CLOSE DB
 	if err := srv.DB.Close(); err != nil {
 		log.Println("Error closing DB:", err)
 	}

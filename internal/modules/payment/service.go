@@ -12,6 +12,14 @@ import (
 	"github.com/xendit/xendit-go/v6/invoice"
 )
 
+// ==========================================
+// 1. DEFINISI INTERFACE (CONTRACT)
+// ==========================================
+// Payment Service mendefinisikan apa yang dia butuhkan dari modul lain.
+type BookingStatusUpdater interface {
+	UpdateBookingStatus(orderID string, status string) error
+}
+
 type PaymentService interface {
 	CreatePayment(req CreatePaymentRequest) (*PaymentResponse, error)
 	ProcessWebhook(req XenditWebhookRequest, webhookToken string) error
@@ -19,15 +27,16 @@ type PaymentService interface {
 
 type paymentService struct {
 	repo         PaymentRepository
+	bookingRepo  BookingStatusUpdater
 	xenditClient *xendit.APIClient
 }
 
-func NewPaymentService(repo PaymentRepository) PaymentService {
-	// Setup Xendit Client menggunakan API Key dari Config
+func NewPaymentService(repo PaymentRepository, bookingRepo BookingStatusUpdater) PaymentService {
 	client := xendit.NewClient(config.AppConfig.XenditSecretKey)
 
 	return &paymentService{
 		repo:         repo,
+		bookingRepo:  bookingRepo,
 		xenditClient: client,
 	}
 }
@@ -36,21 +45,11 @@ func NewPaymentService(repo PaymentRepository) PaymentService {
 // 1. CREATE PAYMENT (Call Xendit)
 // ==========================================
 func (s *paymentService) CreatePayment(req CreatePaymentRequest) (*PaymentResponse, error) {
-	// A. Siapkan Request ke Xendit
-	createInvoiceRequest := *invoice.NewCreateInvoiceRequest(
-		req.OrderID, // External ID (Order ID Kita)
-		req.Amount,
-	)
-	
-	// Tambahkan data opsional agar dashboard Xendit rapi
+	createInvoiceRequest := *invoice.NewCreateInvoiceRequest(req.OrderID, req.Amount)
 	createInvoiceRequest.SetPayerEmail(req.PayerEmail)
 	createInvoiceRequest.SetDescription(req.Description)
-	
-	// Set durasi expired (misal 1 jam / 3600 detik)
-	// Xendit defaultnya 24 jam, kita override jadi 1 jam sesuai flow tiket pesawat
-	createInvoiceRequest.SetInvoiceDuration("3600") 
+	createInvoiceRequest.SetInvoiceDuration("3600")
 
-	// B. Tembak API Xendit (Create Invoice)
 	resp, _, err := s.xenditClient.InvoiceApi.CreateInvoice(context.Background()).
 		CreateInvoiceRequest(createInvoiceRequest).
 		Execute()
@@ -59,31 +58,24 @@ func (s *paymentService) CreatePayment(req CreatePaymentRequest) (*PaymentRespon
 		return nil, errors.New("gagal membuat invoice xendit: " + err.Error())
 	}
 
-	// C. Simpan Response Xendit ke Database Kita (Tabel Payments)
-	// Kita simpan status awal 'PENDING'
 	paymentModel := &models.Payment{
 		OrderID:       req.OrderID,
 		XenditID:      *resp.Id,
 		PaymentMethod: "INVOICE_XENDIT",
 		PaymentStatus: models.PaymentStatusPending,
 		Amount:        req.Amount,
-		PaymentURL:    resp.InvoiceUrl, // Ini Link Pembayarannya!
+		PaymentURL:    resp.InvoiceUrl,
 	}
 
 	if err := s.repo.CreatePayment(paymentModel); err != nil {
 		return nil, err
 	}
 
-	// D. Return Data ke Booking Service (untuk dikirim ke Frontend)
-	// Ambil Expiry Date dari response Xendit (time string -> time.Time)
-	// Xendit return format ISO8601 usually
-	
 	return &PaymentResponse{
 		OrderID:    req.OrderID,
 		XenditID:   *resp.Id,
 		PaymentURL: resp.InvoiceUrl,
 		Status:     models.PaymentStatusPending,
-		// ExpiryDate bisa diparsing dari resp.ExpiryDate jika perlu
 	}, nil
 }
 
@@ -91,31 +83,29 @@ func (s *paymentService) CreatePayment(req CreatePaymentRequest) (*PaymentRespon
 // 2. PROCESS WEBHOOK (Callback Logic)
 // ==========================================
 func (s *paymentService) ProcessWebhook(req XenditWebhookRequest, webhookToken string) error {
-	// A. Security Check (Verifikasi Token)
-	// Pastikan yang nembak endpoint ini benar-benar Xendit
+	// A. Security Check
 	if webhookToken != config.AppConfig.XenditWebhookToken {
 		return errors.New("unauthorized webhook token")
 	}
 
-	// B. Cari Payment di Database berdasarkan Xendit ID
-	// Kita pakai Xendit ID dari JSON Callback
+	// B. Cari Payment
 	payment, err := s.repo.FindPaymentByXenditID(req.ID)
 	if err != nil {
 		return errors.New("payment not found for xendit id: " + req.ID)
 	}
 
-	// C. Cek Status (Idempotency)
-	// Kalau di database sudah PAID, jangan diproses lagi (biar stok gak error)
+	// C. Idempotency Check
 	if payment.PaymentStatus == models.PaymentStatusPaid {
-		return nil // Sudah lunas, abaikan saja
+		return nil 
 	}
 
 	// D. Tentukan Status Baru
 	newStatus := models.PaymentStatusPending
 	var paidAt *time.Time
 
+	// Mapping Status Xendit ke Status Internal
 	switch req.Status {
-case "PAID", "SETTLED":
+	case "PAID", "SETTLED":
 		newStatus = models.PaymentStatusPaid
 		now := time.Now()
 		paidAt = &now
@@ -130,9 +120,21 @@ case "PAID", "SETTLED":
 		return err
 	}
 
-	// TODO: Nanti di sini kita akan panggil Booking Repo 
-	// untuk update status Booking jadi PAID juga.
-	// Tapi karena Booking Repo belum ada, kita skip dulu.
+	// F. [THE INTERFACE CALL] Update Booking Status
+	
+	bookingStatus := models.BookingStatusPending
+	if newStatus == models.PaymentStatusPaid {
+		bookingStatus = models.BookingStatusPaid
+	} else if newStatus == models.PaymentStatusExpired {
+		bookingStatus = models.BookingStatusCancelled 
+	} else if newStatus == models.PaymentStatusFailed {
+		bookingStatus = models.BookingStatusFailed
+	}
+
+	// Panggil Interface
+	if err := s.bookingRepo.UpdateBookingStatus(payment.OrderID, bookingStatus); err != nil {
+		return err 
+	}
 	
 	return nil
 }

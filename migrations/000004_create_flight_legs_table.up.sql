@@ -2,7 +2,7 @@ CREATE TABLE flight_legs (
     id                    SERIAL PRIMARY KEY,
     flight_id             INT NOT NULL REFERENCES flights(id) ON DELETE CASCADE,
 
-    leg_order             INT NOT NULL, -- 1,2,3,...
+    leg_order             INT NOT NULL,
 
     departure_time        TIMESTAMP NOT NULL,
     arrival_time          TIMESTAMP NOT NULL,

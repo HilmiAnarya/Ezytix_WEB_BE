@@ -4,7 +4,6 @@ import (
 	"strconv"
 
 	"github.com/gofiber/fiber/v2"
-	//"ezytix-be/internal/models"
 )
 
 type AirportHandler struct {
@@ -16,10 +15,6 @@ func NewAirportHandler(service AirportService) *AirportHandler {
 		service: service,
 	}
 }
-
-///////////////////////////////////////////
-// CREATE AIRPORT (ADMIN ONLY)
-///////////////////////////////////////////
 
 func (h *AirportHandler) CreateAirport(c *fiber.Ctx) error {
 	var req CreateAirportRequest
@@ -38,10 +33,6 @@ func (h *AirportHandler) CreateAirport(c *fiber.Ctx) error {
 		"airport":    airport,
 	})
 }
-
-///////////////////////////////////////////
-// UPDATE AIRPORT (ADMIN ONLY)
-///////////////////////////////////////////
 
 func (h *AirportHandler) UpdateAirport(c *fiber.Ctx) error {
 	idStr := c.Params("id")
@@ -67,10 +58,6 @@ func (h *AirportHandler) UpdateAirport(c *fiber.Ctx) error {
 	})
 }
 
-///////////////////////////////////////////
-// DELETE AIRPORT (ADMIN ONLY)
-///////////////////////////////////////////
-
 func (h *AirportHandler) DeleteAirport(c *fiber.Ctx) error {
 	idStr := c.Params("id")
 	id, err := strconv.Atoi(idStr)
@@ -88,10 +75,6 @@ func (h *AirportHandler) DeleteAirport(c *fiber.Ctx) error {
 	})
 }
 
-///////////////////////////////////////////
-// GET ALL AIRPORTS
-///////////////////////////////////////////
-
 func (h *AirportHandler) GetAllAirports(c *fiber.Ctx) error {
 	airports, err := h.service.GetAllAirports()
 	if err != nil {
@@ -102,10 +85,6 @@ func (h *AirportHandler) GetAllAirports(c *fiber.Ctx) error {
 		"data": airports,
 	})
 }
-
-///////////////////////////////////////////
-// GET AIRPORT BY ID
-///////////////////////////////////////////
 
 func (h *AirportHandler) GetAirportByID(c *fiber.Ctx) error {
 	idStr := c.Params("id")

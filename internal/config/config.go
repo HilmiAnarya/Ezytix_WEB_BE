@@ -7,8 +7,8 @@ import (
 
 type Config struct {
 	Port                string
-	XenditSecretKey     string // [NEW] Untuk Payment Request
-	XenditWebhookToken  string // [NEW] Untuk Verifikasi Callback
+	XenditSecretKey     string
+	XenditWebhookToken  string
 }
 
 var AppConfig Config
@@ -20,7 +20,6 @@ func LoadConfig() {
 		XenditWebhookToken: getEnv("XENDIT_WEBHOOK_TOKEN", ""),
 	}
 
-	// Validasi Safety: Pastikan key ada saat server start (Opsional tapi recommended)
 	if AppConfig.XenditSecretKey == "" {
 		log.Println("WARNING: XENDIT_SECRET_KEY is missing in .env")
 	}

@@ -49,8 +49,6 @@ func (r *paymentRepository) FindPaymentByXenditID(xenditID string) (*models.Paym
 
 // 4. Update Status (Jadi PAID, EXPIRED, atau FAILED)
 func (r *paymentRepository) UpdatePaymentStatus(orderID string, status string, paidAt *time.Time) error {
-	// Kita update status dan paid_at (jika ada)
-	// Menggunakan Model map agar field yang zero value (seperti paidAt) tetap terupdate
 	updates := map[string]interface{}{
 		"payment_status": status,
 		"updated_at":     time.Now(),

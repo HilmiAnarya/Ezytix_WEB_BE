@@ -25,18 +25,12 @@ func NewAirportService(repo AirportRepository) AirportService {
 	}
 }
 
-//////////////////////////////////////////////////
-// CREATE
-//////////////////////////////////////////////////
-
 func (s *airportService) CreateAirport(req CreateAirportRequest) (*models.Airport, error) {
-	// Normalisasi & validasi code
 	code := strings.ToUpper(strings.TrimSpace(req.Code))
 	if len(code) != 3 {
 		return nil, errors.New("airport code harus 3 huruf (IATA)")
 	}
 
-	// Cek duplikasi code
 	existing, _ := s.repo.FindAirportByCode(code)
 	if existing != nil {
 		return nil, errors.New("airport code sudah digunakan")
@@ -56,24 +50,18 @@ func (s *airportService) CreateAirport(req CreateAirportRequest) (*models.Airpor
 	return airport, nil
 }
 
-//////////////////////////////////////////////////
-// UPDATE
-//////////////////////////////////////////////////
-
 func (s *airportService) UpdateAirport(id uint, req UpdateAirportRequest) (*models.Airport, error) {
 	airport, err := s.repo.FindAirportByID(id)
 	if err != nil {
 		return nil, errors.New("airport tidak ditemukan")
 	}
 
-	// Update code kalau dikirim
 	if req.Code != nil {
 		code := strings.ToUpper(strings.TrimSpace(*req.Code))
 		if len(code) != 3 {
 			return nil, errors.New("airport code harus 3 huruf (IATA)")
 		}
 
-		// Cek duplikasi code (pastikan bukan dirinya sendiri)
 		existing, _ := s.repo.FindAirportByCode(code)
 		if existing != nil && existing.ID != id {
 			return nil, errors.New("airport code sudah dipakai airport lain")
@@ -82,7 +70,6 @@ func (s *airportService) UpdateAirport(id uint, req UpdateAirportRequest) (*mode
 		airport.Code = code
 	}
 
-	// Update city_name kalau dikirim
 	if req.CityName != nil {
 		city := strings.TrimSpace(*req.CityName)
 		if city != "" {
@@ -90,7 +77,6 @@ func (s *airportService) UpdateAirport(id uint, req UpdateAirportRequest) (*mode
 		}
 	}
 
-	// Update airport_name kalau dikirim
 	if req.AirportName != nil {
 		name := strings.TrimSpace(*req.AirportName)
 		if name != "" {
@@ -98,7 +84,6 @@ func (s *airportService) UpdateAirport(id uint, req UpdateAirportRequest) (*mode
 		}
 	}
 
-	// Update country kalau dikirim
 	if req.Country != nil {
 		country := strings.TrimSpace(*req.Country)
 		if country != "" {
@@ -113,10 +98,6 @@ func (s *airportService) UpdateAirport(id uint, req UpdateAirportRequest) (*mode
 	return airport, nil
 }
 
-//////////////////////////////////////////////////
-// DELETE
-//////////////////////////////////////////////////
-
 func (s *airportService) DeleteAirport(id uint) error {
 	_, err := s.repo.FindAirportByID(id)
 	if err != nil {
@@ -126,10 +107,6 @@ func (s *airportService) DeleteAirport(id uint) error {
 	return s.repo.DeleteAirport(id)
 }
 
-//////////////////////////////////////////////////
-// GET BY ID
-//////////////////////////////////////////////////
-
 func (s *airportService) GetAirportByID(id uint) (*models.Airport, error) {
 	airport, err := s.repo.FindAirportByID(id)
 	if err != nil {
@@ -137,10 +114,6 @@ func (s *airportService) GetAirportByID(id uint) (*models.Airport, error) {
 	}
 	return airport, nil
 }
-
-//////////////////////////////////////////////////
-// GET ALL
-//////////////////////////////////////////////////
 
 func (s *airportService) GetAllAirports() ([]models.Airport, error) {
 	return s.repo.FindAllAirports()

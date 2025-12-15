@@ -13,11 +13,9 @@ func AirportRegisterRoutes(app *fiber.App, db *gorm.DB) {
 
 	api := app.Group("/api/v1")
 
-	// PUBLIC (GET)
 	api.Get("/airports", handler.GetAllAirports)
 	api.Get("/airports/:id", handler.GetAirportByID)
 
-	// ADMIN ROUTES (protected nanti pakai middleware)
 	admin := api.Group("/admin")
 
 	admin.Use(middleware.JWTMiddleware)

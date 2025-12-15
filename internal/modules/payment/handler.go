@@ -17,7 +17,7 @@ func NewPaymentHandler(service PaymentService) *PaymentHandler {
 // 1. WEBHOOK HANDLER (Dipanggil oleh Xendit)
 // ================================================
 func (h *PaymentHandler) HandleWebhook(c *fiber.Ctx) error {
-	// A. Ambil Token Verifikasi dari Header
+	// Ambil Token Verifikasi dari Header
 	// Xendit mengirim token di header "x-callback-token"
 	webhookToken := c.Get("x-callback-token")
 	if webhookToken == "" {
@@ -26,7 +26,6 @@ func (h *PaymentHandler) HandleWebhook(c *fiber.Ctx) error {
 		})
 	}
 
-	// B. Parsing Body JSON dari Xendit
 	var req XenditWebhookRequest
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -34,16 +33,12 @@ func (h *PaymentHandler) HandleWebhook(c *fiber.Ctx) error {
 		})
 	}
 
-	// C. Panggil Service untuk memproses logika bisnis
-	// Kita kirim token juga ke service untuk divalidasi dengan env variable
 	if err := h.service.ProcessWebhook(req, webhookToken); err != nil {
-		// Log error jika perlu
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
 		})
 	}
 
-	// D. Return 200 OK (Wajib, agar Xendit tahu kita sudah terima datanya)
 	return c.JSON(fiber.Map{
 		"message": "webhook processed successfully",
 	})
@@ -52,8 +47,6 @@ func (h *PaymentHandler) HandleWebhook(c *fiber.Ctx) error {
 // ================================================
 // 2. TEST CREATE PAYMENT (Hanya untuk Dev/Testing)
 // ================================================
-// Nanti fungsi ini sebenarnya dipanggil internal oleh BookingService.
-// Tapi kita expose dulu via HTTP biar kamu bisa tes Xendit-nya jalan atau nggak.
 func (h *PaymentHandler) TestCreatePayment(c *fiber.Ctx) error {
 	var req CreatePaymentRequest
 

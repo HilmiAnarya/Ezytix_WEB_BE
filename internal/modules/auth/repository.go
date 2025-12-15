@@ -8,18 +8,14 @@ import (
 )
 
 type AuthRepository interface {
-	// For register validation
 	FindByEmail(email string) (*models.User, error)
 	FindByPhone(phone string) (*models.User, error)
 	FindByUsername(username string) (*models.User, error)
 
-	// For login
 	FindByEmailOrPhone(identifier string) (*models.User, error)
 
-	// For refresh token
 	FindByID(id uint) (*models.User, error)
 
-	// Create user
 	CreateUser(user *models.User) error
 	UpdatePassword(userID uint, hashedPassword string) error
 }
@@ -69,7 +65,7 @@ func (r *authRepository) FindByEmail(email string) (*models.User, error) {
 
 	err := r.db.Where("email = ?", email).First(&user).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil // return nil, nil → artinya email BELUM dipakai
+		return nil, nil
 	}
 	return &user, err
 }

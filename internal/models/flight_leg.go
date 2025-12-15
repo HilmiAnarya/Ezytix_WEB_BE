@@ -2,7 +2,6 @@ package models
 
 import "time"
 
-// Flight Leg Model (Segmen Penerbangan)
 type FlightLeg struct {
 	ID                    uint      `json:"id" gorm:"primaryKey;autoIncrement"`
 	FlightID              uint      `json:"flight_id"`
