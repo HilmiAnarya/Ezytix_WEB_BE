@@ -3,6 +3,7 @@ package payment
 import (
 	"context"
 	"errors"
+	"log"
 	"time"
 
 	"ezytix-be/internal/config"
@@ -45,7 +46,9 @@ func NewPaymentService(repo PaymentRepository, bookingRepo BookingStatusUpdater)
 // 1. CREATE PAYMENT (Call Xendit)
 // ==========================================
 func (s *paymentService) CreatePayment(req CreatePaymentRequest) (*PaymentResponse, error) {
-	createInvoiceRequest := *invoice.NewCreateInvoiceRequest(req.OrderID, req.Amount)
+	amountFloat, _ := req.Amount.Float64()
+
+	createInvoiceRequest := *invoice.NewCreateInvoiceRequest(req.OrderID, amountFloat)
 	createInvoiceRequest.SetPayerEmail(req.PayerEmail)
 	createInvoiceRequest.SetDescription(req.Description)
 	createInvoiceRequest.SetInvoiceDuration("3600")
@@ -80,7 +83,7 @@ func (s *paymentService) CreatePayment(req CreatePaymentRequest) (*PaymentRespon
 }
 
 // ==========================================
-// 2. PROCESS WEBHOOK (Callback Logic)
+// 2. PROCESS WEBHOOK (REFACTORED LOGIC)
 // ==========================================
 func (s *paymentService) ProcessWebhook(req XenditWebhookRequest, webhookToken string) error {
 	// A. Security Check
@@ -88,7 +91,7 @@ func (s *paymentService) ProcessWebhook(req XenditWebhookRequest, webhookToken s
 		return errors.New("unauthorized webhook token")
 	}
 
-	// B. Cari Payment
+	// B. Cari Payment (Read Only - Aman)
 	payment, err := s.repo.FindPaymentByXenditID(req.ID)
 	if err != nil {
 		return errors.New("payment not found for xendit id: " + req.ID)
@@ -96,45 +99,68 @@ func (s *paymentService) ProcessWebhook(req XenditWebhookRequest, webhookToken s
 
 	// C. Idempotency Check
 	if payment.PaymentStatus == models.PaymentStatusPaid {
-		return nil 
+		return nil
 	}
 
-	// D. Tentukan Status Baru
-	newStatus := models.PaymentStatusPending
+	// D. Tentukan Status Baru (Mapping)
+	var newPaymentStatus string
+	var bookingStatus string
 	var paidAt *time.Time
 
-	// Mapping Status Xendit ke Status Internal
 	switch req.Status {
 	case "PAID", "SETTLED":
-		newStatus = models.PaymentStatusPaid
-		now := time.Now()
+		newPaymentStatus = models.PaymentStatusPaid
+		bookingStatus = models.BookingStatusPaid
+		now := time.Now().UTC()
 		paidAt = &now
 	case "EXPIRED":
-		newStatus = models.PaymentStatusExpired
+		newPaymentStatus = models.PaymentStatusExpired
+		bookingStatus = models.BookingStatusCancelled
 	case "FAILED":
-		newStatus = models.PaymentStatusFailed
+		newPaymentStatus = models.PaymentStatusFailed
+		bookingStatus = models.BookingStatusFailed
+	default:
+		// Status lain dari Xendit yang tidak kita handle
+		return nil
 	}
 
-	// E. Update Database Payment
-	if err := s.repo.UpdatePaymentStatus(payment.OrderID, newStatus, paidAt); err != nil {
+	// =================================================================
+	// E. LANGKAH 1: UPDATE BOOKING DULUAN (The Gatekeeper)
+	// =================================================================
+	// Kita coba update booking. Repo Booking akan menolak jika statusnya sudah Cancelled.
+	
+	err = s.bookingRepo.UpdateBookingStatus(payment.OrderID, bookingStatus)
+	
+	if err != nil {
+		// E.1. HANDLE ZOMBIE BOOKING (Critical Problem 1)
+		// Karena kita tidak bisa import variable error dari booking (Circular Dependency),
+		// Kita cek pesan errornya secara manual.
+		if err.Error() == "booking already cancelled by scheduler" {
+			log.Printf("[CRITICAL] Race Condition Detected for Order %s. Payment received but Booking already Cancelled.", payment.OrderID)
+			
+			// Action: Ubah status Payment jadi FAILED agar Finance notic
+			// (Uang masuk tapi tiket batal -> Perlu Refund Manual)
+			_ = s.repo.UpdatePaymentStatus(payment.OrderID, models.PaymentStatusFailed, paidAt)
+			
+			return nil // Return nil agar Xendit tidak retry (Case closed)
+		}
+
+		// E.2. HANDLE DB ERROR (Critical Problem 2)
+		// Jika errornya bukan karena Zombie (misal DB putus), kita return error.
+		// Xendit akan membaca ini sebagai 500 dan melakukan RETRY nanti.
+		return err 
+	}
+
+	// =================================================================
+	// F. LANGKAH 2: UPDATE PAYMENT (Jika Booking Aman)
+	// =================================================================
+	if err := s.repo.UpdatePaymentStatus(payment.OrderID, newPaymentStatus, paidAt); err != nil {
+		// Jika di sini gagal (sangat jarang), Booking sudah PAID tapi Payment masih PENDING.
+		// Ini tidak fatal. Xendit akan Retry webhook.
+		// Saat retry, Langkah 1 (Update Booking) akan sukses (idempotent) atau skip,
+		// lalu masuk ke sini lagi untuk fix status Payment.
 		return err
 	}
 
-	// F. [THE INTERFACE CALL] Update Booking Status
-	
-	bookingStatus := models.BookingStatusPending
-	if newStatus == models.PaymentStatusPaid {
-		bookingStatus = models.BookingStatusPaid
-	} else if newStatus == models.PaymentStatusExpired {
-		bookingStatus = models.BookingStatusCancelled 
-	} else if newStatus == models.PaymentStatusFailed {
-		bookingStatus = models.BookingStatusFailed
-	}
-
-	// Panggil Interface
-	if err := s.bookingRepo.UpdateBookingStatus(payment.OrderID, bookingStatus); err != nil {
-		return err 
-	}
-	
 	return nil
 }

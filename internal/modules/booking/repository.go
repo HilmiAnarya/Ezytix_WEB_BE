@@ -9,6 +9,7 @@ import (
 	"gorm.io/gorm"
 )
 
+var ErrBookingAlreadyCancelled = errors.New("booking already cancelled by scheduler")
 type BookingRepository interface {
 	CreateOrder(bookings []models.Booking) error
 	FindBookingsByOrderID(orderID string) ([]models.Booking, error)
@@ -70,6 +71,22 @@ func (r *bookingRepository) FindBookingsByOrderID(orderID string) ([]models.Book
 }
 
 func (r *bookingRepository) UpdateBookingStatus(orderID string, status string) error {
+	var currentStatus string
+	
+	err := r.db.Model(&models.Booking{}).
+		Select("status").
+		Where("order_id = ?", orderID).
+		Scan(&currentStatus).Error
+
+	if err != nil {
+		return err 
+	}
+
+	
+	if currentStatus == models.BookingStatusCancelled {
+		return ErrBookingAlreadyCancelled
+	}
+
 	return r.db.Model(&models.Booking{}).
 		Where("order_id = ?", orderID).
 		Update("status", status).Error

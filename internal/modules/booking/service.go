@@ -3,14 +3,16 @@ package booking
 import (
 	"errors"
 	"fmt"
-	"math/rand"
 	"log"
+	"math/rand"
 	"time"
 
 	"ezytix-be/internal/models"
 	"ezytix-be/internal/modules/auth"
 	"ezytix-be/internal/modules/flight"
 	"ezytix-be/internal/modules/payment"
+
+	"github.com/shopspring/decimal"
 )
 
 type BookingService interface {
@@ -45,10 +47,10 @@ func (s *bookingService) CreateOrder(userID uint, req CreateOrderRequest) (*Book
 		return nil, errors.New("user not found")
 	}
 
-	orderID := fmt.Sprintf("ORD-%s-%s", time.Now().Format("20060102"), generateRandomString(4))
+	orderID := fmt.Sprintf("ORD-%s-%s", time.Now().UTC().Format("20060102"), generateRandomString(4))
 
 	var bookingsToSave []models.Booking
-	var grandTotal float64
+	grandTotal := decimal.Zero
 	var bookingResponses []BookingDetailResponse
 
 	tripType := models.TripTypeOneWay
@@ -73,9 +75,16 @@ func (s *bookingService) CreateOrder(userID uint, req CreateOrderRequest) (*Book
 			return nil, errors.New("seat class not available for this flight")
 		}
 
-		passengerCount := len(item.Passengers)
-		flightTotalPrice := selectedClass.Price * float64(passengerCount)
-		grandTotal += flightTotalPrice
+		// Konversi jumlah penumpang ke Decimal
+		passengerCountInt := int64(len(item.Passengers))
+		passengerCountDec := decimal.NewFromInt(passengerCountInt)
+		
+		// Kalkulasi: Harga Satuan (Decimal) x Jumlah (Decimal) = Total (Decimal)
+		// selectedClass.Price sudah Decimal (dari Model)
+		flightTotalPrice := selectedClass.Price.Mul(passengerCountDec)
+		
+		// Akumulasi: GrandTotal = GrandTotal + FlightTotalPrice
+		grandTotal = grandTotal.Add(flightTotalPrice)
 
 		bookingCode := generatePNR()
 		
@@ -85,7 +94,7 @@ func (s *bookingService) CreateOrder(userID uint, req CreateOrderRequest) (*Book
 			FlightID:        item.FlightID,
 			BookingCode:     bookingCode,
 			TripType:        tripType,
-			TotalPassengers: passengerCount,
+			TotalPassengers: len(item.Passengers),
 			TotalPrice:      flightTotalPrice,
 			Status:          models.BookingStatusPending,
 		}
@@ -124,7 +133,7 @@ func (s *bookingService) CreateOrder(userID uint, req CreateOrderRequest) (*Book
 			Origin:          originCity, 
 			Destination:     destCity,   
 			DepartureTime:   flightData.DepartureTime,
-			TotalPassengers: passengerCount,
+			TotalPassengers: len(item.Passengers),
 			TotalPrice:      flightTotalPrice,
 		})
 	}
@@ -150,7 +159,7 @@ func (s *bookingService) CreateOrder(userID uint, req CreateOrderRequest) (*Book
 		OrderID:         orderID,
 		TotalAmount:     grandTotal,
 		Status:          models.BookingStatusPending,
-		TransactionTime: time.Now(),
+		TransactionTime: time.Now().UTC(),
 		PaymentURL:      paymentResp.PaymentURL, 
 		Bookings:        bookingResponses,
 	}, nil
@@ -159,8 +168,8 @@ func (s *bookingService) CreateOrder(userID uint, req CreateOrderRequest) (*Book
 func (s *bookingService) ProcessExpiredBookings() error {
 	log.Println("[CRON] Checking for expired bookings...")
 
-	expirationDuration := time.Minute * 2 
-	expiryTime := time.Now().Add(-expirationDuration)
+	expirationDuration := time.Minute * 70
+	expiryTime := time.Now().UTC().Add(-expirationDuration)
 
 	expiredBookings, err := s.repo.GetExpiredBookings(expiryTime)
 	if err != nil {
@@ -205,7 +214,7 @@ func generatePNR() string {
 }
 
 func calculatePassengerType(dob time.Time) string {
-	now := time.Now()
+	now := time.Now().UTC()
 	age := now.Year() - dob.Year()
 	if now.YearDay() < dob.YearDay() {
 		age--

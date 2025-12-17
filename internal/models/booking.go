@@ -1,6 +1,10 @@
 package models
 
-import "time"
+import (
+	"time"
+
+	"github.com/shopspring/decimal"
+)
 
 const (
 	BookingStatusPending   = "pending"
@@ -22,7 +26,7 @@ type Booking struct {
 	BookingCode 	string `json:"booking_code" gorm:"size:20;uniqueIndex;not null"`
 	TripType 		string `json:"trip_type" gorm:"type:trip_type;default:'one_way';not null"`
 	TotalPassengers int     `json:"total_passengers" gorm:"not null"`
-	TotalPrice      float64 `json:"total_price" gorm:"type:numeric(15,2);not null"`
+	TotalPrice      decimal.Decimal `json:"total_price" gorm:"type:numeric(15,2);not null"`
 	Status          string  `json:"status" gorm:"size:20;default:'pending';not null"`
 	Details 		[]BookingDetail `json:"details" gorm:"foreignKey:BookingID"`
 	CreatedAt 		time.Time `json:"created_at"`

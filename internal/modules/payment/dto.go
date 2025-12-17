@@ -1,6 +1,9 @@
 package payment
 
-import "time"
+import (
+	"time"
+	"github.com/shopspring/decimal"
+)
 
 // ==========================================
 // 1. INTERNAL DTO (Service to Service)
@@ -9,7 +12,7 @@ import "time"
 // Request: Data yang dikirim Booking Service ke Payment Service
 type CreatePaymentRequest struct {
 	OrderID     string  `json:"order_id"`
-	Amount      float64 `json:"amount"`
+	Amount      decimal.Decimal `json:"amount"`
 	
 	// Data user opsional untuk Invoice Xendit yang lebih rapi
 	PayerName   string  `json:"payer_name"`
@@ -33,11 +36,11 @@ type PaymentResponse struct {
 // Ini struktur JSON standar dari Xendit Invoice Callback
 // Kita hanya ambil field yang penting saja
 type XenditWebhookRequest struct {
-	ID           string  `json:"id"`           // Xendit Invoice ID
-	ExternalID   string  `json:"external_id"`  // Order ID Kita
-	Status       string  `json:"status"`       // PAID, EXPIRED, FAILED
-	Amount       float64 `json:"amount"`       // Jumlah yang dibayar
-	PaidAt       string  `json:"paid_at"`      // Waktu bayar (String ISO8601)
+	ID           string  `json:"id"`           		// Xendit Invoice ID
+	ExternalID   string  `json:"external_id"`  		// Order ID Kita
+	Status       string  `json:"status"`       		// PAID, EXPIRED, FAILED
+	Amount       decimal.Decimal `json:"amount"`    // Jumlah yang dibayar
+	PaidAt       string  `json:"paid_at"`      		// Waktu bayar (String ISO8601)
 	
 	// Field tambahan untuk validasi keamanan (opsional tapi recommended)
 	Created      string  `json:"created"`

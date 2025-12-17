@@ -2,6 +2,8 @@ package booking
 
 import (
 	"time"
+
+	"github.com/shopspring/decimal" // [NEW] Import Library
 )
 
 type PassengerRequest struct {
@@ -31,12 +33,12 @@ type BookingDetailResponse struct {
 	Destination     string    `json:"destination"`
 	DepartureTime   time.Time `json:"departure_time"`
 	TotalPassengers int       `json:"total_passengers"`
-	TotalPrice      float64   `json:"total_price"`
+	TotalPrice      decimal.Decimal `json:"total_price"`
 }
 
 type BookingResponse struct {
 	OrderID         string    `json:"order_id"`
-	TotalAmount     float64   `json:"total_amount"`
+	TotalAmount     decimal.Decimal `json:"total_amount"`
 	Status          string    `json:"status"`
 	TransactionTime time.Time `json:"transaction_time"`
 	PaymentURL      string    `json:"payment_url"` 

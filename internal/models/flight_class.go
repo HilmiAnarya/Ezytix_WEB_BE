@@ -1,12 +1,16 @@
 package models
 
-import "time"
+import (
+	"time"
+
+	"github.com/shopspring/decimal"
+)
 
 type FlightClass struct {
 	ID          uint      `json:"id" gorm:"primaryKey;autoIncrement"`
-	FlightID    uint      `json:"flight_id"`
+	FlightID    uint      `json:"flight_         id"`
 	SeatClass   string    `json:"seat_class" gorm:"type:enum('economy', 'business', 'first_class');not null"`
-	Price       float64   `json:"price" gorm:"not null"`
+	Price      decimal.Decimal `json:"price" gorm:"type:numeric(15,2);not null"`
 	TotalSeats  int       `json:"total_seats" gorm:"not null"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`

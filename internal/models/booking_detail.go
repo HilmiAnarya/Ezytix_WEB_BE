@@ -1,6 +1,10 @@
 package models
 
-import "time"
+import (
+	"time"
+
+	"github.com/shopspring/decimal"
+)
 
 const (
 	PassengerTypeAdult  = "adult"
@@ -21,7 +25,7 @@ type BookingDetail struct {
 	ValidUntil     *time.Time `json:"valid_until" gorm:"type:date"`
 	TicketNumber string `json:"ticket_number" gorm:"size:50;uniqueIndex;not null"`
 	SeatClass string  `json:"seat_class" gorm:"size:50;not null"`
-	Price     float64 `json:"price" gorm:"type:numeric(15,2);not null"`
+	Price          decimal.Decimal `json:"price" gorm:"type:numeric(15,2)"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
