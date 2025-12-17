@@ -111,7 +111,7 @@ func (s *paymentService) ProcessWebhook(req XenditWebhookRequest, webhookToken s
 	case "PAID", "SETTLED":
 		newPaymentStatus = models.PaymentStatusPaid
 		bookingStatus = models.BookingStatusPaid
-		now := time.Now().UTC()
+		now := time.Now()
 		paidAt = &now
 	case "EXPIRED":
 		newPaymentStatus = models.PaymentStatusExpired

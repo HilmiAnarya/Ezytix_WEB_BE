@@ -2,6 +2,7 @@ package flight
 
 import (
 	"errors"
+	"fmt"
 	"ezytix-be/internal/models"
 )
 
@@ -31,25 +32,44 @@ func (s *flightService) CreateFlight(req CreateFlightRequest) (*models.Flight, e
 		return nil, errors.New("arrival time must be after departure time")
 	}
 
-	transitCount := len(req.Legs) - 1
+	// 2. Auto-Calculate Total Duration (Menit)
+	// Kita hitung selisih waktu dalam menit, lalu convert ke int
+	totalDurationMinutes := int(req.ArrivalTime.Sub(req.DepartureTime).Minutes())
+
+	// 3. Auto-Calculate Transit Info
+	transitCount := len(req.FlightLegs) - 1
 	if transitCount < 0 {
-		transitCount = 0 
+		transitCount = 0
+	}
+
+	transitInfo := "Direct"
+	if transitCount > 0 {
+		transitInfo = fmt.Sprintf("%d Transit", transitCount)
 	}
 
 	flight := &models.Flight{
 		FlightCode:           req.FlightCode,
-		AirlineName:          req.AirlineName,
+		AirlineID:            req.AirlineID,
 		OriginAirportID:      req.OriginAirportID,
 		DestinationAirportID: req.DestinationAirportID,
 		DepartureTime:        req.DepartureTime,
 		ArrivalTime:          req.ArrivalTime,
-		TotalDuration:        req.TotalDuration,
-		TransitCount:         transitCount, 
-		TransitInfo:          req.TransitInfo,
+		// Computed Values
+		TotalDuration:        totalDurationMinutes,
+		TransitCount:         transitCount,
+		TransitInfo:          transitInfo,
 	}
 
 	var legs []models.FlightLeg
-	for _, legReq := range req.Legs {
+	for _, legReq := range req.FlightLegs {
+		// Validasi per leg
+		if legReq.ArrivalTime.Before(legReq.DepartureTime) {
+			return nil, errors.New("leg arrival time must be after departure time")
+		}
+
+		// Calculate Leg Duration
+		legDuration := int(legReq.ArrivalTime.Sub(legReq.DepartureTime).Minutes())
+
 		legs = append(legs, models.FlightLeg{
 			LegOrder:             legReq.LegOrder,
 			OriginAirportID:      legReq.OriginAirportID,
@@ -57,20 +77,21 @@ func (s *flightService) CreateFlight(req CreateFlightRequest) (*models.Flight, e
 			DepartureTime:        legReq.DepartureTime,
 			ArrivalTime:          legReq.ArrivalTime,
 			FlightNumber:         legReq.FlightNumber,
-			AirlineName:          legReq.AirlineName,
-			AirlineLogo:          legReq.AirlineLogo,
-			DepartureTerminal:    legReq.DepartureTerminal,
-			ArrivalTerminal:      legReq.ArrivalTerminal,
-			Duration:             legReq.Duration,
+
+			// Normalized & Computed
+			AirlineID:            legReq.AirlineID, // Operating Carrier
+
+			Duration:             legDuration,
 			TransitNotes:         legReq.TransitNotes,
 		})
 	}
 	flight.FlightLegs = legs
 
+	// 6. Mapping Classes
 	var classes []models.FlightClass
-	for _, classReq := range req.Classes {
+	for _, classReq := range req.FlightClasses {
 		classes = append(classes, models.FlightClass{
-			SeatClass:  classReq.SeatClass,
+			SeatClass:       classReq.SeatClass, // Sesuaikan dengan field di Model (Name/SeatClass)
 			Price:      classReq.Price,
 			TotalSeats: classReq.TotalSeats,
 		})
@@ -80,7 +101,7 @@ func (s *flightService) CreateFlight(req CreateFlightRequest) (*models.Flight, e
 	if err := s.repo.CreateFlight(flight); err != nil {
 		return nil, err
 	}
-	return flight, nil
+	return s.repo.GetFlightByID(flight.ID)
 }
 
 func (s *flightService) GetAllFlights() ([]models.Flight, error) {
@@ -92,11 +113,13 @@ func (s *flightService) GetFlightByID(id uint) (*models.Flight, error) {
 }
 
 func (s *flightService) UpdateFlight(id uint, req CreateFlightRequest) (*models.Flight, error) {
+	// Ambil data lama
 	existingFlight, err := s.repo.GetFlightByID(id)
 	if err != nil {
 		return nil, errors.New("flight not found")
 	}
 
+	// Validasi dasar
 	if req.OriginAirportID == req.DestinationAirportID {
 		return nil, errors.New("origin and destination airport cannot be the same")
 	}
@@ -104,19 +127,37 @@ func (s *flightService) UpdateFlight(id uint, req CreateFlightRequest) (*models.
 		return nil, errors.New("arrival time must be after departure time")
 	}
 
+	// Recalculate Logic
+	totalDurationMinutes := int(req.ArrivalTime.Sub(req.DepartureTime).Minutes())
+	transitCount := len(req.FlightLegs) - 1
+	if transitCount < 0 { transitCount = 0 }
+	
+	transitInfo := "Direct"
+	if transitCount > 0 {
+		transitInfo = fmt.Sprintf("%d Transit", transitCount)
+	}
+
+	// Update Fields
 	existingFlight.FlightCode = req.FlightCode
-	existingFlight.AirlineName = req.AirlineName
+	existingFlight.AirlineID = req.AirlineID
 	existingFlight.OriginAirportID = req.OriginAirportID
 	existingFlight.DestinationAirportID = req.DestinationAirportID
 	existingFlight.DepartureTime = req.DepartureTime
 	existingFlight.ArrivalTime = req.ArrivalTime
-	existingFlight.TotalDuration = req.TotalDuration
-	existingFlight.TransitCount = len(req.Legs) - 1
-	if existingFlight.TransitCount < 0 { existingFlight.TransitCount = 0 }
-	existingFlight.TransitInfo = req.TransitInfo
+	
+	// Update Computed Values
+	existingFlight.TotalDuration = totalDurationMinutes
+	existingFlight.TransitCount = transitCount
+	existingFlight.TransitInfo = transitInfo
 
+	// Update Legs
 	var newLegs []models.FlightLeg
-	for _, legReq := range req.Legs {
+	for _, legReq := range req.FlightLegs {
+		if legReq.ArrivalTime.Before(legReq.DepartureTime) {
+			return nil, errors.New("leg arrival time must be after departure time")
+		}
+		legDuration := int(legReq.ArrivalTime.Sub(legReq.DepartureTime).Minutes())
+
 		newLegs = append(newLegs, models.FlightLeg{
 			LegOrder:             legReq.LegOrder,
 			OriginAirportID:      legReq.OriginAirportID,
@@ -124,20 +165,18 @@ func (s *flightService) UpdateFlight(id uint, req CreateFlightRequest) (*models.
 			DepartureTime:        legReq.DepartureTime,
 			ArrivalTime:          legReq.ArrivalTime,
 			FlightNumber:         legReq.FlightNumber,
-			AirlineName:          legReq.AirlineName,
-			AirlineLogo:          legReq.AirlineLogo,
-			DepartureTerminal:    legReq.DepartureTerminal,
-			ArrivalTerminal:      legReq.ArrivalTerminal,
-			Duration:             legReq.Duration,
+			AirlineID:            legReq.AirlineID,
+			Duration:             legDuration,
 			TransitNotes:         legReq.TransitNotes,
 		})
 	}
 	existingFlight.FlightLegs = newLegs
 
+	// Update Classes
 	var newClasses []models.FlightClass
-	for _, classReq := range req.Classes {
+	for _, classReq := range req.FlightClasses {
 		newClasses = append(newClasses, models.FlightClass{
-			SeatClass:  classReq.SeatClass,
+			SeatClass:       classReq.SeatClass,
 			Price:      classReq.Price,
 			TotalSeats: classReq.TotalSeats,
 		})
@@ -147,7 +186,7 @@ func (s *flightService) UpdateFlight(id uint, req CreateFlightRequest) (*models.
 	if err := s.repo.UpdateFlight(existingFlight); err != nil {
 		return nil, err
 	}
-	return existingFlight, nil
+	return s.repo.GetFlightByID(existingFlight.ID)
 }
 
 func (s *flightService) DeleteFlight(id uint) error {

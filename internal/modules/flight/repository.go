@@ -30,20 +30,38 @@ func (r *flightRepository) CreateFlight(flight *models.Flight) error {
 func (r *flightRepository) GetAllFlights() ([]models.Flight, error) {
 	var flights []models.Flight
 
-	err := r.db.Preload("FlightLegs").Preload("FlightClasses").Find(&flights).Error
+	// Kita perlu preload Airline (Master) untuk ditampilkan di list admin
+	err := r.db.
+		Preload("Airline").                 // Ambil Validating Carrier
+		Preload("OriginAirport").
+		Preload("DestinationAirport").
+		Preload("FlightClasses").
+		Order("created_at DESC").           // Best practice: urutkan dari terbaru
+		Find(&flights).Error
+
 	return flights, err
 }
 
 func (r *flightRepository) GetFlightByID(id uint) (*models.Flight, error) {
 	var flight models.Flight
-	
+
 	err := r.db.
+		// 1. Info Utama
+		Preload("Airline").
+		Preload("OriginAirport").
+		Preload("DestinationAirport").
+		
+		// 2. Info Detail Legs (Nested Preload)
 		Preload("FlightLegs").
+		Preload("FlightLegs.Airline").          // PENTING: Logo maskapai per leg
+		Preload("FlightLegs.OriginAirport").    // PENTING: Nama bandara per leg
+		Preload("FlightLegs.DestinationAirport"). 
+		
+		// 3. Info Harga
 		Preload("FlightClasses").
-		Preload("OriginAirport").      
-		Preload("DestinationAirport"). 
+		
 		First(&flight, id).Error
-	
+
 	if err != nil {
 		return nil, err
 	}
@@ -97,9 +115,18 @@ func (r *flightRepository) DeleteFlight(id uint) error {
 func (r *flightRepository) SearchFlights(req SearchFlightRequest) ([]models.Flight, error) {
 	var flights []models.Flight
 
+	// Start Query
 	query := r.db.Model(&models.Flight{}).
-		Preload("FlightLegs"). 
-		Joins("JOIN flight_classes ON flight_classes.flight_id = flights.id") 
+		Preload("Airline").                 // Logo Header
+		Preload("OriginAirport").
+		Preload("DestinationAirport").
+		Preload("FlightLegs").
+		Preload("FlightLegs.Airline").      // Logo Detail Transit
+		Preload("FlightLegs.OriginAirport").
+		Preload("FlightLegs.DestinationAirport").
+		Joins("JOIN flight_classes ON flight_classes.flight_id = flights.id")
+
+	// --- Filtering ---
 
 	if req.OriginAirportID != 0 {
 		query = query.Where("flights.origin_airport_id = ?", req.OriginAirportID)
@@ -108,24 +135,30 @@ func (r *flightRepository) SearchFlights(req SearchFlightRequest) ([]models.Flig
 		query = query.Where("flights.destination_airport_id = ?", req.DestinationAirportID)
 	}
 
+	// Filter Tanggal (Perhatikan tipe data Date di DB)
 	if req.DepartureDate != "" {
 		query = query.Where("DATE(flights.departure_time) = ?", req.DepartureDate)
 	}
 
+	// Filter Seat Class (Economy, Business)
+	// Note: Pastikan kolom di DB namanya 'name' atau 'seat_class' sesuai model FlightClass
 	if req.SeatClass != "" {
-		query = query.Where("flight_classes.seat_class = ?", req.SeatClass)
+		query = query.Where("flight_classes.name = ?", req.SeatClass) 
 	}
 
+	// Filter Jumlah Penumpang (Pastikan ketersediaan kursi cukup)
 	if req.PassengerCount > 0 {
 		query = query.Where("flight_classes.total_seats >= ?", req.PassengerCount)
 	}
 
+	// Preload spesifik kelas yang dicari agar tidak semua kelas termuat (Optional Optimization)
 	if req.SeatClass != "" {
-		query = query.Preload("FlightClasses", "seat_class = ?", req.SeatClass)
+		query = query.Preload("FlightClasses", "name = ?", req.SeatClass)
 	} else {
 		query = query.Preload("FlightClasses")
 	}
 
+	// Eksekusi (Distinct agar tidak duplikat jika join match multiple classes)
 	err := query.Distinct("flights.*").Find(&flights).Error
 
 	return flights, err

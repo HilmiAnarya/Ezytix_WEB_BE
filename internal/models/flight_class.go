@@ -8,7 +8,7 @@ import (
 
 type FlightClass struct {
 	ID          uint      `json:"id" gorm:"primaryKey;autoIncrement"`
-	FlightID    uint      `json:"flight_         id"`
+	FlightID    uint      `json:"flight_id"`
 	SeatClass   string    `json:"seat_class" gorm:"type:enum('economy', 'business', 'first_class');not null"`
 	Price      decimal.Decimal `json:"price" gorm:"type:numeric(15,2);not null"`
 	TotalSeats  int       `json:"total_seats" gorm:"not null"`

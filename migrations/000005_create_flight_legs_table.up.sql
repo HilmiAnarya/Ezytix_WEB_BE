@@ -3,6 +3,7 @@ CREATE TABLE flight_legs (
     flight_id             INT NOT NULL REFERENCES flights(id) ON DELETE CASCADE,
 
     leg_order             INT NOT NULL,
+    airline_id             INT REFERENCES airlines(id),
 
     departure_time        TIMESTAMP NOT NULL,
     arrival_time          TIMESTAMP NOT NULL,
@@ -10,16 +11,11 @@ CREATE TABLE flight_legs (
     origin_airport_id     INT NOT NULL REFERENCES airports(id),
     destination_airport_id INT NOT NULL REFERENCES airports(id),
 
-    flight_number         VARCHAR(50),    -- JT-763, GA-412, dll.
-    airline_name          VARCHAR(100),
-    airline_logo          VARCHAR(255),
+    flight_number         VARCHAR(50),
 
-    departure_terminal    VARCHAR(50),
-    arrival_terminal      VARCHAR(50),
+    duration              INT,
 
-    duration              VARCHAR(50),    -- "1j 10m"
-
-    transit_notes         VARCHAR(255),   -- "Transit di SUB 45m"
+    transit_notes         VARCHAR(255), 
 
     deleted_at            TIMESTAMP NULL,
     created_at            TIMESTAMP NOT NULL DEFAULT NOW(),

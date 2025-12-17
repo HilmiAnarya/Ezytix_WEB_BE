@@ -3,10 +3,13 @@ package server
 import (
 	"ezytix-be/internal/handlers"
 	"ezytix-be/internal/middleware"
+	
+	// --- Import Module ---
+	"ezytix-be/internal/modules/airline" // <--- 1. IMPORT INI
 	"ezytix-be/internal/modules/airport"
 	"ezytix-be/internal/modules/auth"
 	"ezytix-be/internal/modules/booking"
-	"ezytix-be/internal/modules/flight" // <--- 1. Import Module Flight
+	"ezytix-be/internal/modules/flight"
 	"ezytix-be/internal/modules/payment"
 
 	"github.com/gofiber/contrib/websocket"
@@ -30,24 +33,29 @@ func (s *FiberServer) RegisterRoutes() {
 	airport.AirportRegisterRoutes(s.App, s.DB.GetGORMDB())
 
 	// ================================
-	// FLIGHT MODULE (NEW)
+	// AIRLINE MODULE (NEW) ✈️
 	// ================================
-	// <--- 2. Register Module Flight disini
+	// <--- 2. REGISTER DISINI
+	// Ini penting agar endpoint /airlines dan /admin/airlines bisa diakses
+	airline.AirlineRegisterRoutes(s.App, s.DB.GetGORMDB()) 
+
+	// ================================
+	// FLIGHT MODULE
+	// ================================
 	flight.FlightRegisterRoutes(s.App, s.DB.GetGORMDB())
 
 	// ================================
-	// Payment MODULE (NEW)
+	// Payment MODULE
 	// ================================
-	// <--- 3. Register Module Payment disini
 	payment.PaymentRegisterRoutes(s.App, s.DB.GetGORMDB())
 
 	// ================================
-    // BOOKING MODULE (THE FINAL PIECE)
-    // ================================
-    booking.BookingRegisterRoutes(s.App, s.DB.GetGORMDB()) // <--- TAMBAH INI
+	// BOOKING MODULE
+	// ================================
+	booking.BookingRegisterRoutes(s.App, s.DB.GetGORMDB())
 
 	// ================================
-	// ADMIN ROUTES 
+	// ADMIN ROUTES (Global Admin Group - Optional jika belum dipindah ke modul)
 	// ================================
 	admin := s.App.Group("/api/v1/admin")
 	admin.Use(middleware.JWTMiddleware)

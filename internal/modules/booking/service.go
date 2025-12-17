@@ -47,7 +47,7 @@ func (s *bookingService) CreateOrder(userID uint, req CreateOrderRequest) (*Book
 		return nil, errors.New("user not found")
 	}
 
-	orderID := fmt.Sprintf("ORD-%s-%s", time.Now().UTC().Format("20060102"), generateRandomString(4))
+	orderID := fmt.Sprintf("ORD-%s-%s", time.Now().Format("20060102"), generateRandomString(4))
 
 	var bookingsToSave []models.Booking
 	grandTotal := decimal.Zero
@@ -159,7 +159,7 @@ func (s *bookingService) CreateOrder(userID uint, req CreateOrderRequest) (*Book
 		OrderID:         orderID,
 		TotalAmount:     grandTotal,
 		Status:          models.BookingStatusPending,
-		TransactionTime: time.Now().UTC(),
+		TransactionTime: time.Now(),
 		PaymentURL:      paymentResp.PaymentURL, 
 		Bookings:        bookingResponses,
 	}, nil
@@ -169,7 +169,7 @@ func (s *bookingService) ProcessExpiredBookings() error {
 	log.Println("[CRON] Checking for expired bookings...")
 
 	expirationDuration := time.Minute * 70
-	expiryTime := time.Now().UTC().Add(-expirationDuration)
+	expiryTime := time.Now().Add(-expirationDuration)
 
 	expiredBookings, err := s.repo.GetExpiredBookings(expiryTime)
 	if err != nil {
@@ -214,7 +214,7 @@ func generatePNR() string {
 }
 
 func calculatePassengerType(dob time.Time) string {
-	now := time.Now().UTC()
+	now := time.Now()
 	age := now.Year() - dob.Year()
 	if now.YearDay() < dob.YearDay() {
 		age--
