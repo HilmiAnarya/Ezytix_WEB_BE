@@ -48,7 +48,7 @@ type CreateFlightRequest struct {
 type SearchFlightRequest struct {
 	OriginAirportID      uint   `query:"origin"`
 	DestinationAirportID uint   `query:"destination"`
-	DepartureDate        string `query:"date"`
+	DepartureDate        string `query:"departure_date"`
 	SeatClass            string `query:"seat_class"`
 	PassengerCount       int    `query:"passengers"`
 }

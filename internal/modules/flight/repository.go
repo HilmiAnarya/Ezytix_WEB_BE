@@ -2,6 +2,8 @@ package flight
 
 import (
 	"ezytix-be/internal/models"
+	"time"
+
 	"gorm.io/gorm"
 )
 
@@ -135,15 +137,34 @@ func (r *flightRepository) SearchFlights(req SearchFlightRequest) ([]models.Flig
 		query = query.Where("flights.destination_airport_id = ?", req.DestinationAirportID)
 	}
 
-	// Filter Tanggal (Perhatikan tipe data Date di DB)
+	// 🔥 FIX UTAMA DI SINI (DATE RANGE FILTER) 🔥
 	if req.DepartureDate != "" {
-		query = query.Where("DATE(flights.departure_time) = ?", req.DepartureDate)
+		// 1. Parsing string tanggal (Format YYYY-MM-DD)
+		// Kita asumsikan input "2024-05-20"
+		dateLayout := "2006-01-02" 
+		parsedDate, err := time.Parse(dateLayout, req.DepartureDate)
+		
+		if err == nil {
+			// 2. Buat Rentang Waktu (Start of Day - End of Day)
+			// PENTING: Jika DB menyimpan UTC, pastikan range ini mencakup "overlap" 
+			// atau kita cari "sepanjang hari itu" secara absolut.
+			
+			// Start: 2024-05-20 00:00:00
+			startOfDay := parsedDate 
+			
+			// End:   2024-05-20 23:59:59 (atau < 2024-05-21 00:00:00)
+			endOfDay := startOfDay.Add(24 * time.Hour)
+
+			// Query: "departure_time >= Start AND departure_time < End"
+			// Ini menangani TIMESTAMP dengan sangat cepat (memakai Index)
+			query = query.Where("flights.departure_time >= ? AND flights.departure_time < ?", startOfDay, endOfDay)
+		}
 	}
 
 	// Filter Seat Class (Economy, Business)
 	// Note: Pastikan kolom di DB namanya 'name' atau 'seat_class' sesuai model FlightClass
 	if req.SeatClass != "" {
-		query = query.Where("flight_classes.name = ?", req.SeatClass) 
+		query = query.Where("flight_classes.seat_class = ?", req.SeatClass) 
 	}
 
 	// Filter Jumlah Penumpang (Pastikan ketersediaan kursi cukup)
@@ -153,7 +174,7 @@ func (r *flightRepository) SearchFlights(req SearchFlightRequest) ([]models.Flig
 
 	// Preload spesifik kelas yang dicari agar tidak semua kelas termuat (Optional Optimization)
 	if req.SeatClass != "" {
-		query = query.Preload("FlightClasses", "name = ?", req.SeatClass)
+		query = query.Preload("FlightClasses", "seat_class = ?", req.SeatClass)
 	} else {
 		query = query.Preload("FlightClasses")
 	}
