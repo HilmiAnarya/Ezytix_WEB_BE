@@ -12,12 +12,16 @@ import (
 	"ezytix-be/internal/modules/flight"
 	"ezytix-be/internal/modules/payment"
 
+
 	"github.com/shopspring/decimal"
 )
 
 type BookingService interface {
 	CreateOrder(userID uint, req CreateOrderRequest) (*BookingResponse, error)
 	ProcessExpiredBookings() error
+	
+	// [NEW] Method untuk Riwayat Pemesanan
+    GetUserBookings(userID uint) ([]MyBookingResponse, error)
 }
 
 type bookingService struct {
@@ -244,4 +248,69 @@ func dateToPointer(dateStr string) *time.Time {
 		return nil
 	}
 	return &t
+}
+
+// [NEW] Implementasi GetUserBookings
+func (s *bookingService) GetUserBookings(userID uint) ([]MyBookingResponse, error) {
+    // 1. Ambil data booking mentah dari Repository (sudah preloaded Flight, Airline, dll)
+    bookings, err := s.repo.GetByUserID(userID)
+    if err != nil {
+        return nil, err
+    }
+
+    var responses []MyBookingResponse
+
+    // 2. Looping setiap booking untuk diformat
+    for _, b := range bookings {
+        
+        // A. Hitung Durasi Penerbangan
+        duration := b.Flight.ArrivalTime.Sub(b.Flight.DepartureTime)
+
+        // B. Mapping Detail Penerbangan (Flight -> DTO)
+        flightDetail := BookingFlightDetail{
+            FlightCode:      b.Flight.FlightCode,
+            AirlineName:     b.Flight.Airline.Name,
+            AirlineLogo:     b.Flight.Airline.LogoURL, 
+            // Format: "Jakarta (CGK)"
+            Origin:          fmt.Sprintf("%s (%s)", b.Flight.OriginAirport.CityName, b.Flight.OriginAirport.Code),
+            Destination:     fmt.Sprintf("%s (%s)", b.Flight.DestinationAirport.CityName, b.Flight.DestinationAirport.Code),
+            DepartureTime:   b.Flight.DepartureTime,
+            ArrivalTime:     b.Flight.ArrivalTime,
+            DurationMinutes: int(duration.Minutes()),
+        }
+
+        // C. Logika Pembayaran (Khusus Status PENDING)
+        var paymentURL string
+        var expiryTime *time.Time
+
+        // Jika status PENDING, kita butuh Link Bayar & Waktu Expired
+        if b.Status == models.BookingStatusPending {
+            // Panggil Payment Service untuk cari Payment berdasarkan OrderID
+            // Note: Pastikan paymentService punya method FindPaymentByOrderID (Lihat catatan di bawah)
+            paymentData, err := s.paymentService.FindPaymentByOrderID(b.OrderID) 
+            if err == nil && paymentData != nil {
+                paymentURL = paymentData.PaymentURL
+                
+                // Set Expiry: Misal 1 jam dari created_at booking
+                // Sesuaikan dengan logic expired di sistemmu (misal 60 menit)
+                exp := b.CreatedAt.Add(60 * time.Minute) 
+                expiryTime = &exp
+            }
+        }
+
+        // D. Susun Response Akhir
+        resp := MyBookingResponse{
+            BookingCode: b.BookingCode,
+            Status:      b.Status, // pending, paid, cancelled, failed
+            TotalAmount: b.TotalPrice, // Menggunakan TotalPrice dari model Booking
+            CreatedAt:   b.CreatedAt,
+            PaymentUrl:  paymentURL,
+            ExpiryTime:  expiryTime,
+            Flight:      flightDetail,
+        }
+
+        responses = append(responses, resp)
+    }
+
+    return responses, nil
 }

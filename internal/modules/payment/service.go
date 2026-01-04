@@ -3,6 +3,7 @@ package payment
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"time"
 
@@ -24,6 +25,8 @@ type BookingStatusUpdater interface {
 type PaymentService interface {
 	CreatePayment(req CreatePaymentRequest) (*PaymentResponse, error)
 	ProcessWebhook(req XenditWebhookRequest, webhookToken string) error
+	// 🔥 TAMBAHKAN BARIS INI AGAR BISA DIPANGGIL DARI LUAR 🔥
+	FindPaymentByOrderID(orderID string) (*models.Payment, error)
 }
 
 type paymentService struct {
@@ -53,11 +56,22 @@ func (s *paymentService) CreatePayment(req CreatePaymentRequest) (*PaymentRespon
 	createInvoiceRequest.SetDescription(req.Description)
 	createInvoiceRequest.SetInvoiceDuration("3600")
 
+	// 🔥 [STEP 2 IMPLEMENTATION] Inject Redirect URL
+	// Pastikan FRONTEND_URL di .env tidak memiliki slash di akhir (misal: http://localhost:5173)
+	successURL := fmt.Sprintf("%s/booking/success?order_id=%s", config.AppConfig.FrontendURL, req.OrderID)
+	createInvoiceRequest.SetSuccessRedirectUrl(successURL)
+
+	// (Opsional) Jika ingin handle redirect saat gagal
+	// failureURL := fmt.Sprintf("%s/booking/failed?order_id=%s", config.AppConfig.FrontendURL, req.OrderID)
+	// createInvoiceRequest.SetFailureRedirectUrl(failureURL)
+
 	resp, _, err := s.xenditClient.InvoiceApi.CreateInvoice(context.Background()).
 		CreateInvoiceRequest(createInvoiceRequest).
 		Execute()
 
 	if err != nil {
+		// Log error detail untuk debugging jika Xendit menolak
+		log.Printf("Xendit Error: %v", err)
 		return nil, errors.New("gagal membuat invoice xendit: " + err.Error())
 	}
 
@@ -163,4 +177,8 @@ func (s *paymentService) ProcessWebhook(req XenditWebhookRequest, webhookToken s
 	}
 
 	return nil
+}
+
+func (s *paymentService) FindPaymentByOrderID(orderID string) (*models.Payment, error) {
+    return s.repo.FindPaymentByOrderID(orderID)
 }

@@ -36,6 +36,7 @@ func BookingRegisterRoutes(app *fiber.App, db *gorm.DB) {
 	bookings := api.Group("/bookings")
 	bookings.Use(middleware.JWTMiddleware)
 	bookings.Post("/", bookingHandler.CreateOrder)
+	bookings.Get("/history", bookingHandler.GetMyBookings) // [NEW] Read Booking History
 
 	// Route Payment Webhook
 	payments := api.Group("/payments")

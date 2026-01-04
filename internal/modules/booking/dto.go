@@ -45,3 +45,29 @@ type BookingResponse struct {
 	ExpiryDate      *time.Time `json:"expiry_date"`
 	Bookings        []BookingDetailResponse `json:"bookings"`
 }
+
+// [NEW] Struct untuk Response History
+type MyBookingResponse struct {
+	BookingCode     string              `json:"booking_code"`
+	Status          string              `json:"status"` // pending, paid, cancelled, failed
+	TotalAmount     decimal.Decimal     `json:"total_amount"`
+	CreatedAt       time.Time           `json:"created_at"`
+	
+	// Data Pembayaran (Penting untuk tab 'Tertunda')
+	PaymentUrl      string              `json:"payment_url,omitempty"` 
+	ExpiryTime      *time.Time          `json:"expiry_time,omitempty"` 
+
+	// Data Penerbangan (Penting untuk tab 'Aktif' & Card UI)
+	Flight          BookingFlightDetail `json:"flight"`
+}
+
+type BookingFlightDetail struct {
+	FlightCode      string    `json:"flight_code"`
+	AirlineName     string    `json:"airline_name"`
+	AirlineLogo     string    `json:"airline_logo"` // URL Logo
+	Origin          string    `json:"origin"`       // Format: "Jakarta (CGK)"
+	Destination     string    `json:"destination"`  // Format: "Bali (DPS)"
+	DepartureTime   time.Time `json:"departure_time"`
+	ArrivalTime     time.Time `json:"arrival_time"`
+	DurationMinutes int       `json:"duration_minutes"`
+}

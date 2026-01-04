@@ -16,6 +16,7 @@ type BookingRepository interface {
 	UpdateBookingStatus(orderID string, status string) error
 	GetExpiredBookings(expiryTime time.Time) ([]models.Booking, error)
 	CancelBookingAtomic(booking *models.Booking) error
+	GetByUserID(userID uint) ([]models.Booking, error)
 }
 
 type bookingRepository struct {
@@ -128,4 +129,29 @@ func (r *bookingRepository) CancelBookingAtomic(booking *models.Booking) error {
 
 		return nil
 	})
+}
+
+// [NEW] Implementasi GetByUserID dengan Eager Loading Gila-gilaan
+func (r *bookingRepository) GetByUserID(userID uint) ([]models.Booking, error) {
+	var bookings []models.Booking
+
+	// Kita butuh Preload bertingkat untuk mengambil data Flight, Airline, Airport, dan Payment
+	// Payment di-join manual (bukan preload) kadang lebih efisien, tapi Preload GORM lebih rapi untuk case ini.
+    // Asumsi: Di model Booking belum ada relasi Payment, nanti kita cek/tambahkan.
+    // Untuk sekarang kita preload Flight dkk dulu.
+    
+	err := r.db.
+		Preload("Flight").
+		Preload("Flight.Airline").
+		Preload("Flight.OriginAirport").
+		Preload("Flight.DestinationAirport").
+		Where("user_id = ?", userID).
+		Order("created_at DESC"). // Paling baru di atas
+		Find(&bookings).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	return bookings, nil
 }
