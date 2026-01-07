@@ -170,37 +170,41 @@ func (s *bookingService) CreateOrder(userID uint, req CreateOrderRequest) (*Book
 }
 
 func (s *bookingService) ProcessExpiredBookings() error {
-	log.Println("[CRON] Checking for expired bookings...")
+	log.Println("[CRON] --- Starting Scheduler Job ---")
 
-	expirationDuration := time.Minute * 70
+    // --- TUGAS 1: Batalkan PENDING yang telat bayar ---
+	expirationDuration := time.Minute * 60 // Misal 60 menit
 	expiryTime := time.Now().Add(-expirationDuration)
 
-	expiredBookings, err := s.repo.GetExpiredBookings(expiryTime)
+	expiredPendingBookings, err := s.repo.GetExpiredBookings(expiryTime)
 	if err != nil {
-		log.Printf("[CRON] Error fetching expired bookings: %v\n", err)
-		return err
-	}
+		log.Printf("[CRON] Error fetching pending expired bookings: %v\n", err)
+	} else {
+        if len(expiredPendingBookings) > 0 {
+            log.Printf("[CRON] Found %d pending bookings to cancel.\n", len(expiredPendingBookings))
+            for _, booking := range expiredPendingBookings {
+                err := s.repo.CancelBookingAtomic(&booking)
+                if err != nil {
+                    log.Printf("[CRON] Failed to cancel Pending Booking ID %d: %v\n", booking.ID, err)
+                    continue 
+                }
+                log.Printf("[CRON] Cancelled Pending Booking ID %d (Stock restored).\n", booking.ID)
+            }
+        }
+    }
 
-	if len(expiredBookings) == 0 {
-		log.Println("[CRON] No expired bookings found.")
-		return nil
-	}
+    // --- TUGAS 2: Update PAID yang sudah terbang (Step 0) ---
+    // Tidak perlu loop satu-satu, panggil repo untuk bulk update
+    err = s.repo.UpdatePastBookingsToExpired()
+    if err != nil {
+        log.Printf("[CRON] Error updating past flights to expired: %v\n", err)
+    } else {
+        // Kita tidak tahu persis berapa row yg update karena Exec GORM generik di repo tadi, 
+        // tapi tidak masalah untuk log sederhana.
+        log.Println("[CRON] Successfully updated past active bookings to 'expired' status.")
+    }
 
-	log.Printf("[CRON] Found %d expired bookings. Processing cancellations...\n", len(expiredBookings))
-
-	successCount := 0
-	for _, booking := range expiredBookings {
-		err := s.repo.CancelBookingAtomic(&booking)
-		if err != nil {
-			log.Printf("[CRON] Failed to cancel Booking ID %d (Order %s): %v\n", booking.ID, booking.OrderID, err)
-			continue 
-		}
-		
-		log.Printf("[CRON] Success cancel Booking ID %d (Order %s). Stock restored.\n", booking.ID, booking.OrderID)
-		successCount++
-	}
-
-	log.Printf("[CRON] Job Finished. Successfully cancelled %d/%d bookings.\n", successCount, len(expiredBookings))
+	log.Println("[CRON] --- Job Finished ---")
 	return nil
 }
 
@@ -250,67 +254,83 @@ func dateToPointer(dateStr string) *time.Time {
 	return &t
 }
 
-// [NEW] Implementasi GetUserBookings
+// [NEW] Implementasi GetUserBookings dengan SeatClass & ClassCode
 func (s *bookingService) GetUserBookings(userID uint) ([]MyBookingResponse, error) {
-    // 1. Ambil data booking mentah dari Repository (sudah preloaded Flight, Airline, dll)
-    bookings, err := s.repo.GetByUserID(userID)
-    if err != nil {
-        return nil, err
-    }
+	// 1. Ambil data booking mentah dari Repository
+	bookings, err := s.repo.GetByUserID(userID)
+	if err != nil {
+		return nil, err
+	}
 
-    var responses []MyBookingResponse
+	var responses []MyBookingResponse
 
-    // 2. Looping setiap booking untuk diformat
-    for _, b := range bookings {
-        
-        // A. Hitung Durasi Penerbangan
-        duration := b.Flight.ArrivalTime.Sub(b.Flight.DepartureTime)
+	// 2. Looping setiap booking untuk diformat
+	for _, b := range bookings {
+		
+		// A. Hitung Durasi Penerbangan
+		duration := b.Flight.ArrivalTime.Sub(b.Flight.DepartureTime)
 
-        // B. Mapping Detail Penerbangan (Flight -> DTO)
-        flightDetail := BookingFlightDetail{
-            FlightCode:      b.Flight.FlightCode,
-            AirlineName:     b.Flight.Airline.Name,
-            AirlineLogo:     b.Flight.Airline.LogoURL, 
-            // Format: "Jakarta (CGK)"
-            Origin:          fmt.Sprintf("%s (%s)", b.Flight.OriginAirport.CityName, b.Flight.OriginAirport.Code),
-            Destination:     fmt.Sprintf("%s (%s)", b.Flight.DestinationAirport.CityName, b.Flight.DestinationAirport.Code),
-            DepartureTime:   b.Flight.DepartureTime,
-            ArrivalTime:     b.Flight.ArrivalTime,
-            DurationMinutes: int(duration.Minutes()),
-        }
+		// B. Ambil SeatClass & Cari ClassCode
+		var seatClass string
+		var classCode string
 
-        // C. Logika Pembayaran (Khusus Status PENDING)
-        var paymentURL string
-        var expiryTime *time.Time
+		// Ambil SeatClass dari detail penumpang pertama (asumsi satu booking = satu kelas)
+		if len(b.Details) > 0 {
+			seatClass = b.Details[0].SeatClass
+		}
 
-        // Jika status PENDING, kita butuh Link Bayar & Waktu Expired
-        if b.Status == models.BookingStatusPending {
-            // Panggil Payment Service untuk cari Payment berdasarkan OrderID
-            // Note: Pastikan paymentService punya method FindPaymentByOrderID (Lihat catatan di bawah)
-            paymentData, err := s.paymentService.FindPaymentByOrderID(b.OrderID) 
-            if err == nil && paymentData != nil {
-                paymentURL = paymentData.PaymentURL
-                
-                // Set Expiry: Misal 1 jam dari created_at booking
-                // Sesuaikan dengan logic expired di sistemmu (misal 60 menit)
-                exp := b.CreatedAt.Add(60 * time.Minute) 
-                expiryTime = &exp
-            }
-        }
+		// Cari ClassCode (misal: "I9") dengan mencocokkan SeatClass di daftar FlightClasses
+		for _, fc := range b.Flight.FlightClasses {
+			// Menggunakan EqualFold untuk case-insensitive comparison (economy == Economy)
+			if fc.SeatClass == seatClass {
+				classCode = fc.ClassCode
+				break
+			}
+		}
 
-        // D. Susun Response Akhir
-        resp := MyBookingResponse{
-            BookingCode: b.BookingCode,
-            Status:      b.Status, // pending, paid, cancelled, failed
-            TotalAmount: b.TotalPrice, // Menggunakan TotalPrice dari model Booking
-            CreatedAt:   b.CreatedAt,
-            PaymentUrl:  paymentURL,
-            ExpiryTime:  expiryTime,
-            Flight:      flightDetail,
-        }
+		// C. Mapping Detail Penerbangan (Flight -> DTO)
+		flightDetail := BookingFlightDetail{
+			FlightCode:      b.Flight.FlightCode,
+			AirlineName:     b.Flight.Airline.Name,
+			AirlineLogo:     b.Flight.Airline.LogoURL,
+			Origin:          fmt.Sprintf("%s (%s)", b.Flight.OriginAirport.CityName, b.Flight.OriginAirport.Code),
+			Destination:     fmt.Sprintf("%s (%s)", b.Flight.DestinationAirport.CityName, b.Flight.DestinationAirport.Code),
+			DepartureTime:   b.Flight.DepartureTime,
+			ArrivalTime:     b.Flight.ArrivalTime,
+			DurationMinutes: int(duration.Minutes()),
+			
+			// [BARU] Isi field kelas
+			SeatClass:       seatClass, 
+			ClassCode:       classCode,
+		}
 
-        responses = append(responses, resp)
-    }
+		// D. Logika Pembayaran (Khusus Status PENDING)
+		var paymentURL string
+		var expiryTime *time.Time
 
-    return responses, nil
+		if b.Status == models.BookingStatusPending {
+			paymentData, err := s.paymentService.FindPaymentByOrderID(b.OrderID)
+			if err == nil && paymentData != nil {
+				paymentURL = paymentData.PaymentURL
+				// Set Expiry 60 menit
+				exp := b.CreatedAt.Add(60 * time.Minute)
+				expiryTime = &exp
+			}
+		}
+
+		// E. Susun Response Akhir
+		resp := MyBookingResponse{
+			BookingCode: b.BookingCode,
+			Status:      b.Status,
+			TotalAmount: b.TotalPrice,
+			CreatedAt:   b.CreatedAt,
+			PaymentUrl:  paymentURL,
+			ExpiryTime:  expiryTime,
+			Flight:      flightDetail,
+		}
+
+		responses = append(responses, resp)
+	}
+
+	return responses, nil
 }

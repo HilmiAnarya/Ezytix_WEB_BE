@@ -10,6 +10,7 @@ import (
 )
 
 var ErrBookingAlreadyCancelled = errors.New("booking already cancelled by scheduler")
+
 type BookingRepository interface {
 	CreateOrder(bookings []models.Booking) error
 	FindBookingsByOrderID(orderID string) ([]models.Booking, error)
@@ -17,6 +18,8 @@ type BookingRepository interface {
 	GetExpiredBookings(expiryTime time.Time) ([]models.Booking, error)
 	CancelBookingAtomic(booking *models.Booking) error
 	GetByUserID(userID uint) ([]models.Booking, error)
+	// [NEW] Method untuk update tiket yang sudah terbang
+    UpdatePastBookingsToExpired() error
 }
 
 type bookingRepository struct {
@@ -145,6 +148,8 @@ func (r *bookingRepository) GetByUserID(userID uint) ([]models.Booking, error) {
 		Preload("Flight.Airline").
 		Preload("Flight.OriginAirport").
 		Preload("Flight.DestinationAirport").
+		Preload("Flight.FlightClasses"). // [BARU] Perlu ini untuk cari ClassCode (I9)
+		Preload("Details").              // [BARU] Perlu ini untuk tahu SeatClass user
 		Where("user_id = ?", userID).
 		Order("created_at DESC"). // Paling baru di atas
 		Find(&bookings).Error
@@ -154,4 +159,24 @@ func (r *bookingRepository) GetByUserID(userID uint) ([]models.Booking, error) {
 	}
 
 	return bookings, nil
+}
+
+// [NEW IMPLEMENTATION]
+// Mengubah status booking 'paid' menjadi 'expired' jika waktu kedatangan penerbangan < waktu sekarang
+func (r *bookingRepository) UpdatePastBookingsToExpired() error {
+    // Menggunakan Raw SQL agar performa tinggi (Bulk Update)
+    // Asumsi: Database PostgreSQL
+    query := `
+        UPDATE bookings
+        SET status = ?
+        FROM flights
+        WHERE bookings.flight_id = flights.id
+        AND bookings.status = ?
+        AND flights.arrival_time < ?
+    `
+    // Parameter: Status Baru ('expired'), Status Lama ('paid'), Waktu Sekarang
+    // Pastikan string status sesuai dengan enum di model kamu (misal: "expired", "paid")
+    err := r.db.Exec(query, models.BookingStatusExpired, models.BookingStatusPaid, time.Now()).Error
+    
+    return err
 }

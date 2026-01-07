@@ -15,6 +15,7 @@ import (
 
 type CreateFlightClassRequest struct {
 	SeatClass  string          `json:"seat_class" validate:"required,oneof=economy business first_class"`
+	ClassCode  string          `json:"class_code" validate:"required"` // [BARU] Input Kode Sub-Kelas (I9, Y, H)
 	Price      decimal.Decimal `json:"price" validate:"required"`
 	TotalSeats int             `json:"total_seats" validate:"required,min=1"`
 }
@@ -60,6 +61,7 @@ type SearchFlightRequest struct {
 
 type FlightClassResponse struct {
 	SeatClass  string          `json:"seat_class"`
+	ClassCode  string          `json:"class_code"` // [BARU] Output Kode Sub-Kelas
 	Price      decimal.Decimal `json:"price"`
 	TotalSeats int             `json:"total_seats"`
 }

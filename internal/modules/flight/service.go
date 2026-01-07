@@ -33,7 +33,6 @@ func (s *flightService) CreateFlight(req CreateFlightRequest) (*models.Flight, e
 	}
 
 	// 2. Auto-Calculate Total Duration (Menit)
-	// Kita hitung selisih waktu dalam menit, lalu convert ke int
 	totalDurationMinutes := int(req.ArrivalTime.Sub(req.DepartureTime).Minutes())
 
 	// 3. Auto-Calculate Transit Info
@@ -91,7 +90,8 @@ func (s *flightService) CreateFlight(req CreateFlightRequest) (*models.Flight, e
 	var classes []models.FlightClass
 	for _, classReq := range req.FlightClasses {
 		classes = append(classes, models.FlightClass{
-			SeatClass:       classReq.SeatClass, // Sesuaikan dengan field di Model (Name/SeatClass)
+			SeatClass:  classReq.SeatClass,
+			ClassCode:  classReq.ClassCode, // [BARU] Mapping field ClassCode
 			Price:      classReq.Price,
 			TotalSeats: classReq.TotalSeats,
 		})
@@ -130,8 +130,10 @@ func (s *flightService) UpdateFlight(id uint, req CreateFlightRequest) (*models.
 	// Recalculate Logic
 	totalDurationMinutes := int(req.ArrivalTime.Sub(req.DepartureTime).Minutes())
 	transitCount := len(req.FlightLegs) - 1
-	if transitCount < 0 { transitCount = 0 }
-	
+	if transitCount < 0 {
+		transitCount = 0
+	}
+
 	transitInfo := "Direct"
 	if transitCount > 0 {
 		transitInfo = fmt.Sprintf("%d Transit", transitCount)
@@ -144,7 +146,7 @@ func (s *flightService) UpdateFlight(id uint, req CreateFlightRequest) (*models.
 	existingFlight.DestinationAirportID = req.DestinationAirportID
 	existingFlight.DepartureTime = req.DepartureTime
 	existingFlight.ArrivalTime = req.ArrivalTime
-	
+
 	// Update Computed Values
 	existingFlight.TotalDuration = totalDurationMinutes
 	existingFlight.TransitCount = transitCount
@@ -176,7 +178,8 @@ func (s *flightService) UpdateFlight(id uint, req CreateFlightRequest) (*models.
 	var newClasses []models.FlightClass
 	for _, classReq := range req.FlightClasses {
 		newClasses = append(newClasses, models.FlightClass{
-			SeatClass:       classReq.SeatClass,
+			SeatClass:  classReq.SeatClass,
+			ClassCode:  classReq.ClassCode, // [BARU] Mapping field ClassCode di Update
 			Price:      classReq.Price,
 			TotalSeats: classReq.TotalSeats,
 		})
@@ -204,7 +207,7 @@ func (s *flightService) SearchFlights(req SearchFlightRequest) ([]models.Flight,
 	}
 
 	if req.PassengerCount <= 0 {
-		req.PassengerCount = 1 
+		req.PassengerCount = 1
 	}
 
 	return s.repo.SearchFlights(req)

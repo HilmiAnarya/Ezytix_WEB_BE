@@ -11,6 +11,7 @@ const (
 	BookingStatusPaid      = "paid"
 	BookingStatusCancelled = "cancelled"
 	BookingStatusFailed    = "failed"
+	BookingStatusExpired    = "expired"
 
 	TripTypeOneWay    = "one_way"
 	TripTypeRoundTrip = "round_trip"

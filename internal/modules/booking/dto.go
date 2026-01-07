@@ -70,4 +70,8 @@ type BookingFlightDetail struct {
 	DepartureTime   time.Time `json:"departure_time"`
 	ArrivalTime     time.Time `json:"arrival_time"`
 	DurationMinutes int       `json:"duration_minutes"`
+
+	// [BARU] Tambahan Data Kelas
+	SeatClass       string    `json:"seat_class"` // Contoh: "Economy"
+	ClassCode       string    `json:"class_code"` // Contoh: "I9"
 }
