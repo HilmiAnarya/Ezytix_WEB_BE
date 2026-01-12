@@ -18,7 +18,6 @@ type BookingRepository interface {
 	GetExpiredBookings(expiryTime time.Time) ([]models.Booking, error)
 	CancelBookingAtomic(booking *models.Booking) error
 	GetByUserID(userID uint) ([]models.Booking, error)
-	// [NEW] Method untuk update tiket yang sudah terbang
     UpdatePastBookingsToExpired() error
 }
 

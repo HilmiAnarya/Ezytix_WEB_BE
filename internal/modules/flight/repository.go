@@ -117,18 +117,15 @@ func (r *flightRepository) DeleteFlight(id uint) error {
 func (r *flightRepository) SearchFlights(req SearchFlightRequest) ([]models.Flight, error) {
 	var flights []models.Flight
 
-	// Start Query
 	query := r.db.Model(&models.Flight{}).
-		Preload("Airline").                 // Logo Header
+		Preload("Airline").             
 		Preload("OriginAirport").
 		Preload("DestinationAirport").
 		Preload("FlightLegs").
-		Preload("FlightLegs.Airline").      // Logo Detail Transit
+		Preload("FlightLegs.Airline"). 
 		Preload("FlightLegs.OriginAirport").
 		Preload("FlightLegs.DestinationAirport").
 		Joins("JOIN flight_classes ON flight_classes.flight_id = flights.id")
-
-	// --- Filtering ---
 
 	if req.OriginAirportID != 0 {
 		query = query.Where("flights.origin_airport_id = ?", req.OriginAirportID)
@@ -136,50 +133,28 @@ func (r *flightRepository) SearchFlights(req SearchFlightRequest) ([]models.Flig
 	if req.DestinationAirportID != 0 {
 		query = query.Where("flights.destination_airport_id = ?", req.DestinationAirportID)
 	}
-
-	// 🔥 FIX UTAMA DI SINI (DATE RANGE FILTER) 🔥
 	if req.DepartureDate != "" {
-		// 1. Parsing string tanggal (Format YYYY-MM-DD)
-		// Kita asumsikan input "2024-05-20"
 		dateLayout := "2006-01-02" 
 		parsedDate, err := time.Parse(dateLayout, req.DepartureDate)
 		
 		if err == nil {
-			// 2. Buat Rentang Waktu (Start of Day - End of Day)
-			// PENTING: Jika DB menyimpan UTC, pastikan range ini mencakup "overlap" 
-			// atau kita cari "sepanjang hari itu" secara absolut.
-			
-			// Start: 2024-05-20 00:00:00
 			startOfDay := parsedDate 
-			
-			// End:   2024-05-20 23:59:59 (atau < 2024-05-21 00:00:00)
 			endOfDay := startOfDay.Add(24 * time.Hour)
-
-			// Query: "departure_time >= Start AND departure_time < End"
-			// Ini menangani TIMESTAMP dengan sangat cepat (memakai Index)
 			query = query.Where("flights.departure_time >= ? AND flights.departure_time < ?", startOfDay, endOfDay)
 		}
 	}
-
-	// Filter Seat Class (Economy, Business)
-	// Note: Pastikan kolom di DB namanya 'name' atau 'seat_class' sesuai model FlightClass
 	if req.SeatClass != "" {
 		query = query.Where("flight_classes.seat_class = ?", req.SeatClass) 
 	}
-
-	// Filter Jumlah Penumpang (Pastikan ketersediaan kursi cukup)
 	if req.PassengerCount > 0 {
 		query = query.Where("flight_classes.total_seats >= ?", req.PassengerCount)
 	}
-
-	// Preload spesifik kelas yang dicari agar tidak semua kelas termuat (Optional Optimization)
 	if req.SeatClass != "" {
 		query = query.Preload("FlightClasses", "seat_class = ?", req.SeatClass)
 	} else {
 		query = query.Preload("FlightClasses")
 	}
 
-	// Eksekusi (Distinct agar tidak duplikat jika join match multiple classes)
 	err := query.Distinct("flights.*").Find(&flights).Error
 
 	return flights, err
