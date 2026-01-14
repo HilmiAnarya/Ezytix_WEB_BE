@@ -30,6 +30,7 @@ type Booking struct {
 	TotalPrice      decimal.Decimal `json:"total_price" gorm:"type:numeric(15,2);not null"`
 	Status          string  `json:"status" gorm:"size:20;default:'pending';not null"`
 	Details 		[]BookingDetail `json:"details" gorm:"foreignKey:BookingID"`
+	ExpiredAt       *time.Time      `json:"expired_at"` // Pointer agar bisa null (opsional)
 	CreatedAt 		time.Time `json:"created_at"`
 	UpdatedAt 		time.Time `json:"updated_at"`
 }

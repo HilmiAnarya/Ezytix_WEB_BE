@@ -2,47 +2,39 @@ package payment
 
 import (
 	"time"
-	"github.com/shopspring/decimal"
 )
 
 // ==========================================
-// 1. INTERNAL DTO (Service to Service)
+// 1. INITIATE PAYMENT (Frontend -> Backend)
 // ==========================================
 
-// Request: Data yang dikirim Booking Service ke Payment Service
-type CreatePaymentRequest struct {
-	OrderID     string  `json:"order_id"`
-	Amount      decimal.Decimal `json:"amount"`
-	
-	// Data user opsional untuk Invoice Xendit yang lebih rapi
-	PayerName   string  `json:"payer_name"`
-	PayerEmail  string  `json:"payer_email"`
-	Description string  `json:"description"` // Misal: "Payment for Order #123"
+// Request dari Frontend saat user klik "Bayar" setelah memilih metode
+type InitiatePaymentRequest struct {
+	OrderID       string `json:"order_id" validate:"required"`
+	PaymentMethod string `json:"payment_method" validate:"required"` // Contoh: "BCA", "MANDIRI", "OVO", "QRIS"
+	PaymentType   string `json:"payment_type" validate:"required"`   // Contoh: "VIRTUAL_ACCOUNT", "E_WALLET", "QR_CODE"
 }
 
-// Response: Data yang dikembalikan Payment Service ke Booking Service
-type PaymentResponse struct {
+// Response ke Frontend (Data untuk ditampilkan di Waiting Page)
+type InitiatePaymentResponse struct {
 	OrderID     string    `json:"order_id"`
-	XenditID    string    `json:"xendit_id"`
-	PaymentURL  string    `json:"payment_url"` // Link redirect atau QR String
+	PaymentMethod string  `json:"payment_method"`
+	
+	// Field dinamis tergantung metode bayar
+	PaymentCode string    `json:"payment_code,omitempty"` // Nomor VA (untuk Virtual Account)
+	QrString    string    `json:"qr_string,omitempty"`    // String QR (untuk QRIS)
+	DeepLink    string    `json:"deep_link,omitempty"`    // Link redirect app (untuk E-Wallet seperti ShopeePay/Gopay)
+	
+	Amount      float64   `json:"amount"`
+	ExpiryTime  time.Time `json:"expiry_time"`
 	Status      string    `json:"status"`
-	ExpiryDate  *time.Time `json:"expiry_date"` // Kapan link ini kadaluarsa
 }
 
 // ==========================================
-// 2. WEBHOOK DTO (Xendit to Backend)
+// 2. WEBHOOK DTO (Xendit -> Backend)
 // ==========================================
 
-// Ini struktur JSON standar dari Xendit Invoice Callback
-// Kita hanya ambil field yang penting saja
-type XenditWebhookRequest struct {
-	ID           string  `json:"id"`           		// Xendit Invoice ID
-	ExternalID   string  `json:"external_id"`  		// Order ID Kita
-	Status       string  `json:"status"`       		// PAID, EXPIRED, FAILED
-	Amount       decimal.Decimal `json:"amount"`    // Jumlah yang dibayar
-	PaidAt       string  `json:"paid_at"`      		// Waktu bayar (String ISO8601)
-	
-	// Field tambahan untuk validasi keamanan (opsional tapi recommended)
-	Created      string  `json:"created"`
-	Updated      string  `json:"updated"`
+type XenditNotification struct {
+    Event string                 `json:"event"` // e.g., "payment.succeeded"
+    Data  map[string]interface{} `json:"data"`  // Isinya dinamis
 }

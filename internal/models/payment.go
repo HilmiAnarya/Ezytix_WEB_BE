@@ -14,18 +14,27 @@ const (
 )
 
 type Payment struct {
-	ID            uint            `json:"id" gorm:"primaryKey;autoIncrement"`
-	OrderID       string          `json:"order_id" gorm:"size:50;not null;index"`
-	XenditID      string          `json:"xendit_id" gorm:"size:100;index"`
-	PaymentMethod string          `json:"payment_method" gorm:"size:50;default:'QRIS'"`
-	PaymentStatus string          `json:"payment_status" gorm:"size:20;default:'PENDING';not null"`
+	ID            int             `json:"id" gorm:"primaryKey"`
+	OrderID       string          `json:"order_id" gorm:"index"` // Relasi ke Booking
 	
-	// [UPDATED] float64 -> decimal.Decimal
-	Amount        decimal.Decimal `json:"amount" gorm:"type:numeric(15,2);not null"`
+	// Xendit Info
+	XenditID      string          `json:"xendit_id"`      // ID Transaksi dari Xendit
+	PaymentMethod string          `json:"payment_method"` // BCA, OVO
+	PaymentChannel string         `json:"payment_channel"`// VIRTUAL_ACCOUNT, QR_CODE
+	PaymentStatus string          `json:"payment_status"` // PENDING, PAID
 	
-	Currency      string          `json:"currency" gorm:"size:3;default:'IDR'"`
-	PaymentURL    string          `json:"payment_url" gorm:"type:text"`
+	// Transaction Details
+	Amount        decimal.Decimal `json:"amount" gorm:"type:numeric(15,2)"`
+	Currency      string          `json:"currency"`
+	
+	// Display Data (Hasil Initiate)
+	PaymentCode   string          `json:"payment_code"`   // Nomor VA
+	QrString      string          `json:"qr_string"`      // QR Raw String
+	PaymentUrl    string          `json:"payment_url"`    // Redirect URL (E-wallet)
+	ExpiryTime    *time.Time      `json:"expiry_time"`    // Kapan expire
+	
 	PaidAt        *time.Time      `json:"paid_at"`
+	
 	CreatedAt     time.Time       `json:"created_at"`
 	UpdatedAt     time.Time       `json:"updated_at"`
 }

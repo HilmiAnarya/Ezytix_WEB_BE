@@ -23,6 +23,7 @@ CREATE TABLE bookings (
     
     status              VARCHAR(20) NOT NULL DEFAULT 'pending', -- pending, paid, cancelled, failed
     
+    expired_at          TIMESTAMP,
     created_at          TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMP NOT NULL DEFAULT NOW()
 );
@@ -31,3 +32,4 @@ CREATE TABLE bookings (
 CREATE INDEX idx_bookings_user_id ON bookings(user_id);
 CREATE INDEX idx_bookings_order_id ON bookings(order_id); -- <--- KUNCI GROUPING
 CREATE INDEX idx_bookings_booking_code ON bookings(booking_code);
+CREATE INDEX idx_bookings_expired_at ON bookings(expired_at);

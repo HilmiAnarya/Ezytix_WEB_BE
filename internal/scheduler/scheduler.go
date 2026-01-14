@@ -6,25 +6,32 @@ import (
 	"github.com/robfig/cron/v3"
 )
 
+// Interface ini harus di-implement oleh BookingService
 type ExpiredBookingProcessor interface {
 	ProcessExpiredBookings() error
 }
 
 func StartCronJob(processor ExpiredBookingProcessor) {
-	c := cron.New()
+	// Menggunakan Standard Chain agar log cron lebih rapi (Recover panic + Logger)
+	c := cron.New(cron.WithChain(
+		cron.Recover(cron.DefaultLogger), 
+	))
 
-	// "@every 1m" adalah syntax robfig/cron untuk interval 1 menit.
+	// Jalankan setiap 1 menit
+	// Syntax: @every 1m
 	_, err := c.AddFunc("@every 1m", func() {
-		// Logika yang dijalankan tiap menit:
+		// Log start (opsional, bisa dimatikan kalau berisik)
+		// log.Println("[SCHEDULER] Checking expired bookings...")
+
 		if err := processor.ProcessExpiredBookings(); err != nil {
-			log.Printf("[CRON ERROR] Gagal memproses booking expired: %v\n", err)
+			log.Printf("❌ [SCHEDULER ERROR] Failed to process expired bookings: %v\n", err)
 		}
 	})
 
 	if err != nil {
-		log.Fatal("Gagal menginisialisasi Cron Job:", err)
+		log.Fatal("❌ [SCHEDULER] Failed to initialize Cron Job:", err)
 	}
 
 	c.Start()
-	log.Println("✅ [SCHEDULER] Cron Job started: Checking expired bookings every 1 minute...")
+	log.Println("✅ [SCHEDULER] Cron Job started: Strict Expiry Check active (Every 1 min)")
 }

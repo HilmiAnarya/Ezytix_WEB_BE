@@ -3,41 +3,42 @@ package payment
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"ezytix-be/internal/config"
 	"ezytix-be/internal/models"
 
 	"github.com/xendit/xendit-go/v6"
-	"github.com/xendit/xendit-go/v6/invoice"
+	"github.com/xendit/xendit-go/v6/payment_request"
 )
 
 // ==========================================
-// 1. DEFINISI INTERFACE (CONTRACT)
+// 1. DEFINISI INTERFACE
 // ==========================================
-// Payment Service mendefinisikan apa yang dia butuhkan dari modul lain.
-type BookingStatusUpdater interface {
+
+// BookingDataAccessor: Hanya ambil data dan update status.
+// TIDAK ADA fungsi update expiry, karena Expiry Booking bersifat STRICT/IMMUTABLE.
+type BookingDataAccessor interface {
 	UpdateBookingStatus(orderID string, status string) error
+	GetBookingByOrderID(orderID string) (*models.Booking, error)
 }
 
 type PaymentService interface {
-	CreatePayment(req CreatePaymentRequest) (*PaymentResponse, error)
-	ProcessWebhook(req XenditWebhookRequest, webhookToken string) error
-	// 🔥 TAMBAHKAN BARIS INI AGAR BISA DIPANGGIL DARI LUAR 🔥
+	InitiatePayment(req InitiatePaymentRequest) (*InitiatePaymentResponse, error)
+	ProcessWebhook(payload map[string]interface{}, webhookToken string) error
 	FindPaymentByOrderID(orderID string) (*models.Payment, error)
 }
 
 type paymentService struct {
 	repo         PaymentRepository
-	bookingRepo  BookingStatusUpdater
+	bookingRepo  BookingDataAccessor
 	xenditClient *xendit.APIClient
 }
 
-func NewPaymentService(repo PaymentRepository, bookingRepo BookingStatusUpdater) PaymentService {
+func NewPaymentService(repo PaymentRepository, bookingRepo BookingDataAccessor) PaymentService {
 	client := xendit.NewClient(config.AppConfig.XenditSecretKey)
-
 	return &paymentService{
 		repo:         repo,
 		bookingRepo:  bookingRepo,
@@ -46,139 +47,277 @@ func NewPaymentService(repo PaymentRepository, bookingRepo BookingStatusUpdater)
 }
 
 // ==========================================
-// 1. CREATE PAYMENT (Call Xendit)
+// 2. INITIATE PAYMENT (BRAIN OF THE OPERATION)
 // ==========================================
-func (s *paymentService) CreatePayment(req CreatePaymentRequest) (*PaymentResponse, error) {
-	amountFloat, _ := req.Amount.Float64()
+func (s *paymentService) InitiatePayment(req InitiatePaymentRequest) (*InitiatePaymentResponse, error) {
+	// 1. Ambil Data Booking
+	booking, err := s.bookingRepo.GetBookingByOrderID(req.OrderID)
+	if err != nil {
+		return nil, errors.New("booking not found")
+	}
 
-	createInvoiceRequest := *invoice.NewCreateInvoiceRequest(req.OrderID, amountFloat)
-	createInvoiceRequest.SetPayerEmail(req.PayerEmail)
-	createInvoiceRequest.SetDescription(req.Description)
-	createInvoiceRequest.SetInvoiceDuration("3600")
+	// 2. [STRICT VALIDATION] Cek Expiry Booking
+	if booking.ExpiredAt == nil {
+		return nil, errors.New("booking expiry data is corrupt")
+	}
+	
+	timeRemaining := time.Until(*booking.ExpiredAt)
+	
+	// A. Jika sudah expired
+	if timeRemaining <= 0 {
+		return nil, errors.New("booking has expired, please create a new order")
+	}
 
-	// 🔥 [STEP 2 IMPLEMENTATION] Inject Redirect URL
-	// Pastikan FRONTEND_URL di .env tidak memiliki slash di akhir (misal: http://localhost:5173)
-	successURL := fmt.Sprintf("%s/booking/success?order_id=%s", config.AppConfig.FrontendURL, req.OrderID)
-	createInvoiceRequest.SetSuccessRedirectUrl(successURL)
+	// B. Jika waktu terlalu mepet (< 5 menit), tolak demi keamanan
+	if timeRemaining < 5*time.Minute {
+		return nil, errors.New("payment window closing soon (less than 5 mins), please create a new order")
+	}
 
-	// (Opsional) Jika ingin handle redirect saat gagal
-	// failureURL := fmt.Sprintf("%s/booking/failed?order_id=%s", config.AppConfig.FrontendURL, req.OrderID)
-	// createInvoiceRequest.SetFailureRedirectUrl(failureURL)
+	// 3. Cek Idempotency (Existing Payment)
+	existingPayment, _ := s.repo.FindPaymentByOrderID(req.OrderID)
+	if existingPayment != nil && existingPayment.PaymentStatus == models.PaymentStatusPending {
+		// Jika metode sama, return data lama
+		if existingPayment.PaymentMethod == req.PaymentMethod {
+			return &InitiatePaymentResponse{
+				OrderID:       existingPayment.OrderID,
+				PaymentMethod: existingPayment.PaymentMethod,
+				PaymentCode:   existingPayment.PaymentCode,
+				QrString:      existingPayment.QrString,
+				DeepLink:      existingPayment.PaymentUrl,
+				Amount:        booking.TotalPrice.InexactFloat64(),
+				ExpiryTime:    *existingPayment.ExpiryTime, // Tetap gunakan expiry lama (karena sama dengan booking)
+				Status:        models.PaymentStatusPending,
+			}, nil
+		}
+		// Jika metode beda, kita akan overwrite di DB (Last Win Strategy)
+	}
 
-	resp, _, err := s.xenditClient.InvoiceApi.CreateInvoice(context.Background()).
-		CreateInvoiceRequest(createInvoiceRequest).
-		Execute()
+	// 4. Routing ke Xendit API
+	// Kita passing Expiry Booking ke Xendit agar VA mati bersamaan dengan Booking
+	bookingExpiry := *booking.ExpiredAt
+	amountFloat := booking.TotalPrice.InexactFloat64()
+	var resp *InitiatePaymentResponse
+
+	switch req.PaymentType {
+	case "VIRTUAL_ACCOUNT":
+		resp, err = s.createFixedVA(req, amountFloat, bookingExpiry)
+	case "QR_CODE":
+		// QRIS Xendit V6 mungkin tidak support set expiry spesifik per request.
+		// Jadi kita hanya passing untuk kebutuhan struct response backend.
+		resp, err = s.createQRCode(req, amountFloat, bookingExpiry)
+	default:
+		return nil, errors.New("payment type not supported")
+	}
 
 	if err != nil {
-		// Log error detail untuk debugging jika Xendit menolak
-		log.Printf("Xendit Error: %v", err)
-		return nil, errors.New("gagal membuat invoice xendit: " + err.Error())
+		return nil, err
 	}
 
+	// 5. Simpan Payment ke Database
 	paymentModel := &models.Payment{
-		OrderID:       req.OrderID,
-		XenditID:      *resp.Id,
-		PaymentMethod: "INVOICE_XENDIT",
-		PaymentStatus: models.PaymentStatusPending,
-		Amount:        req.Amount,
-		PaymentURL:    resp.InvoiceUrl,
+		OrderID:        req.OrderID,
+		XenditID:       "PR-" + req.OrderID, // Bisa diganti ID asli dari resp Xendit jika perlu
+		PaymentMethod:  req.PaymentMethod,
+		PaymentChannel: req.PaymentType,
+		PaymentStatus:  models.PaymentStatusPending,
+		Amount:         booking.TotalPrice,
+		PaymentCode:    resp.PaymentCode,
+		QrString:       resp.QrString,
+		PaymentUrl:     resp.DeepLink,
+		ExpiryTime:     &bookingExpiry, // Payment Expiry = Booking Expiry
 	}
 
+	// Upsert Logic
 	if err := s.repo.CreatePayment(paymentModel); err != nil {
 		return nil, err
 	}
 
-	return &PaymentResponse{
-		OrderID:    req.OrderID,
-		XenditID:   *resp.Id,
-		PaymentURL: resp.InvoiceUrl,
-		Status:     models.PaymentStatusPending,
+	return resp, nil
+}
+
+// --- HELPER: Create Virtual Account ---
+func (s *paymentService) createFixedVA(req InitiatePaymentRequest, amount float64, expiryTime time.Time) (*InitiatePaymentResponse, error) {
+	currency := payment_request.PAYMENTREQUESTCURRENCY_IDR
+
+	// A. Main Params
+	pr := *payment_request.NewPaymentRequestParameters(currency)
+	pr.SetAmount(amount)
+	pr.SetReferenceId(req.OrderID)
+
+	// B. Channel Properties
+	channelProps := *payment_request.NewVirtualAccountChannelProperties("Ezytix Customer")
+	
+	// [STRICT] Set Expiry VA SAMA PERSIS dengan Booking Expiry
+	channelProps.SetExpiresAt(expiryTime)
+
+	// C. Channel Code
+	channelCode := payment_request.VirtualAccountChannelCode(req.PaymentMethod)
+
+	// D. VA Params
+	vaParams := *payment_request.NewVirtualAccountParameters(channelCode, channelProps)
+
+	// E. Payment Method Params
+	pmParams := *payment_request.NewPaymentMethodParameters(
+		payment_request.PAYMENTMETHODTYPE_VIRTUAL_ACCOUNT,
+		payment_request.PAYMENTMETHODREUSABILITY_ONE_TIME_USE,
+	)
+	pmParams.SetVirtualAccount(vaParams)
+
+	pr.SetPaymentMethod(pmParams)
+
+	// F. Execute
+	resp, _, err := s.xenditClient.PaymentRequestApi.CreatePaymentRequest(context.Background()).
+		PaymentRequestParameters(pr).
+		Execute()
+
+	if err != nil {
+		log.Printf("Xendit VA Error: %v", err)
+		return nil, errors.New("failed to create virtual account")
+	}
+
+	// G. Parse Response
+	var vaNumber string
+	if resp.PaymentMethod.VirtualAccount.IsSet() {
+		vaData := resp.PaymentMethod.VirtualAccount.Get()
+		if vaData != nil && vaData.ChannelProperties.VirtualAccountNumber != nil {
+			vaNumber = *vaData.ChannelProperties.VirtualAccountNumber
+		}
+	}
+
+	if vaNumber == "" {
+		return nil, errors.New("xendit did not return VA number")
+	}
+
+	return &InitiatePaymentResponse{
+		OrderID:       req.OrderID,
+		PaymentMethod: req.PaymentMethod,
+		PaymentCode:   vaNumber,
+		Amount:        amount,
+		ExpiryTime:    expiryTime,
+		Status:        models.PaymentStatusPending,
+	}, nil
+}
+
+// --- HELPER: Create QR Code ---
+func (s *paymentService) createQRCode(req InitiatePaymentRequest, amount float64, expiryTime time.Time) (*InitiatePaymentResponse, error) {
+	currency := payment_request.PAYMENTREQUESTCURRENCY_IDR
+
+	// A. Main Params
+	pr := *payment_request.NewPaymentRequestParameters(currency)
+	pr.SetAmount(amount)
+	pr.SetReferenceId(req.OrderID)
+
+	// B. QR Params
+	qrParams := *payment_request.NewQRCodeParameters()
+	qrParams.SetChannelCode("QRIS")
+	
+	// Note: Xendit QRIS V6 tidak selalu support set expiry di level ini. 
+	// Jika tidak support, QRIS akan default 30 menit atau sesuai setting merchant.
+	// Namun Backend kita tetap menolak pembayaran jika booking expired.
+
+	// C. Payment Method Params
+	pmParams := *payment_request.NewPaymentMethodParameters(
+		payment_request.PAYMENTMETHODTYPE_QR_CODE,
+		payment_request.PAYMENTMETHODREUSABILITY_ONE_TIME_USE,
+	)
+	pmParams.SetQrCode(qrParams)
+
+	pr.SetPaymentMethod(pmParams)
+
+	// D. Execute
+	resp, _, err := s.xenditClient.PaymentRequestApi.CreatePaymentRequest(context.Background()).
+		PaymentRequestParameters(pr).
+		Execute()
+
+	if err != nil {
+		log.Printf("Xendit QR Error: %v", err)
+		return nil, errors.New("failed to create qr code")
+	}
+
+	// E. Parse Response
+	var qrString string
+	if resp.PaymentMethod.QrCode.IsSet() {
+		qrData := resp.PaymentMethod.QrCode.Get()
+		if qrData != nil && qrData.ChannelProperties.QrString != nil {
+			qrString = *qrData.ChannelProperties.QrString
+		}
+	}
+
+	if qrString == "" {
+		return nil, errors.New("xendit did not return QR string")
+	}
+
+	return &InitiatePaymentResponse{
+		OrderID:       req.OrderID,
+		PaymentMethod: "QRIS",
+		QrString:      qrString,
+		Amount:        amount,
+		ExpiryTime:    expiryTime,
+		Status:        models.PaymentStatusPending,
 	}, nil
 }
 
 // ==========================================
-// 2. PROCESS WEBHOOK (REFACTORED LOGIC)
+// 3. PROCESS WEBHOOK
 // ==========================================
-func (s *paymentService) ProcessWebhook(req XenditWebhookRequest, webhookToken string) error {
+func (s *paymentService) ProcessWebhook(payload map[string]interface{}, webhookToken string) error {
 	// A. Security Check
 	if webhookToken != config.AppConfig.XenditWebhookToken {
 		return errors.New("unauthorized webhook token")
 	}
 
-	// B. Cari Payment (Read Only - Aman)
-	payment, err := s.repo.FindPaymentByXenditID(req.ID)
-	if err != nil {
-		return errors.New("payment not found for xendit id: " + req.ID)
+	// B. Parse Event
+	eventType, ok := payload["event"].(string)
+	if !ok {
+		return nil 
 	}
-
-	// C. Idempotency Check
-	if payment.PaymentStatus == models.PaymentStatusPaid {
-		return nil
-	}
-
-	// D. Tentukan Status Baru (Mapping)
-	var newPaymentStatus string
-	var bookingStatus string
-	var paidAt *time.Time
-
-	switch req.Status {
-	case "PAID", "SETTLED":
-		newPaymentStatus = models.PaymentStatusPaid
-		bookingStatus = models.BookingStatusPaid
-		now := time.Now()
-		paidAt = &now
-	case "EXPIRED":
-		newPaymentStatus = models.PaymentStatusExpired
-		bookingStatus = models.BookingStatusCancelled
-	case "FAILED":
-		newPaymentStatus = models.PaymentStatusFailed
-		bookingStatus = models.BookingStatusFailed
-	default:
-		// Status lain dari Xendit yang tidak kita handle
-		return nil
-	}
-
-	// =================================================================
-	// E. LANGKAH 1: UPDATE BOOKING DULUAN (The Gatekeeper)
-	// =================================================================
-	// Kita coba update booking. Repo Booking akan menolak jika statusnya sudah Cancelled.
 	
-	err = s.bookingRepo.UpdateBookingStatus(payment.OrderID, bookingStatus)
+	// C. Filter Event: Hanya peduli Payment Succeeded
+	// Jika Expired/Failed, kita biarkan saja (karena Booking otomatis expired oleh scheduler)
+	if eventType != "payment.succeeded" {
+		return nil 
+	}
+
+	// D. Extract Data
+	data, _ := payload["data"].(map[string]interface{})
 	
-	if err != nil {
-		// E.1. HANDLE ZOMBIE BOOKING (Critical Problem 1)
-		// Karena kita tidak bisa import variable error dari booking (Circular Dependency),
-		// Kita cek pesan errornya secara manual.
-		if err.Error() == "booking already cancelled by scheduler" {
-			log.Printf("[CRITICAL] Race Condition Detected for Order %s. Payment received but Booking already Cancelled.", payment.OrderID)
-			
-			// Action: Ubah status Payment jadi FAILED agar Finance notic
-			// (Uang masuk tapi tiket batal -> Perlu Refund Manual)
-			_ = s.repo.UpdatePaymentStatus(payment.OrderID, models.PaymentStatusFailed, paidAt)
-			
-			return nil // Return nil agar Xendit tidak retry (Case closed)
+	referenceID, _ := data["reference_id"].(string) 
+	
+	if referenceID == "" {
+		// Fallback Xendit ID
+		xenditID, _ := data["id"].(string)
+		payment, err := s.repo.FindPaymentByXenditID(xenditID)
+		if err == nil {
+			referenceID = payment.OrderID
+		} else {
+			return errors.New("unknown transaction")
 		}
-
-		// E.2. HANDLE DB ERROR (Critical Problem 2)
-		// Jika errornya bukan karena Zombie (misal DB putus), kita return error.
-		// Xendit akan membaca ini sebagai 500 dan melakukan RETRY nanti.
-		return err 
 	}
 
-	// =================================================================
-	// F. LANGKAH 2: UPDATE PAYMENT (Jika Booking Aman)
-	// =================================================================
-	if err := s.repo.UpdatePaymentStatus(payment.OrderID, newPaymentStatus, paidAt); err != nil {
-		// Jika di sini gagal (sangat jarang), Booking sudah PAID tapi Payment masih PENDING.
-		// Ini tidak fatal. Xendit akan Retry webhook.
-		// Saat retry, Langkah 1 (Update Booking) akan sukses (idempotent) atau skip,
-		// lalu masuk ke sini lagi untuk fix status Payment.
+	// E. Update Status (Gatekeeper)
+	// Kita tidak perlu cek expiry di sini secara manual, karena BookingRepo.UpdateBookingStatus
+	// seharusnya menolak update jika status sudah CANCELLED/EXPIRED (Tergantung implementasi repo).
+	// Tapi untuk keamanan, kita update payment dulu.
+	
+	now := time.Now()
+	
+	// 1. Update Booking Status -> PAID
+	err := s.bookingRepo.UpdateBookingStatus(referenceID, models.BookingStatusPaid)
+	if err != nil {
+		// Jika Booking sudah dicancel Scheduler, kita tandai payment FAILED (Money In, No Ticket)
+		if strings.Contains(strings.ToLower(err.Error()), "cancelled") || strings.Contains(strings.ToLower(err.Error()), "expired") {
+			_ = s.repo.UpdatePaymentStatus(referenceID, models.PaymentStatusFailed, &now)
+			return nil
+		}
 		return err
 	}
 
-	return nil
+	// 2. Update Payment Status -> PAID
+	err = s.repo.UpdatePaymentStatus(referenceID, models.PaymentStatusPaid, &now)
+	
+	return err
 }
 
 func (s *paymentService) FindPaymentByOrderID(orderID string) (*models.Payment, error) {
-    return s.repo.FindPaymentByOrderID(orderID)
+	return s.repo.FindPaymentByOrderID(orderID)
 }

@@ -3,8 +3,9 @@ package booking
 import (
 	"errors"
 	"fmt"
+	"time"
+
 	"ezytix-be/internal/models"
-	"time" 
 
 	"gorm.io/gorm"
 )
@@ -13,12 +14,22 @@ var ErrBookingAlreadyCancelled = errors.New("booking already cancelled by schedu
 
 type BookingRepository interface {
 	CreateOrder(bookings []models.Booking) error
+	
+	// [NEW] Untuk kebutuhan Payment Service (Single Object)
+	GetBookingByOrderID(orderID string) (*models.Booking, error)
+	
+	// [LEGACY] Untuk kebutuhan internal booking (List)
 	FindBookingsByOrderID(orderID string) ([]models.Booking, error)
+	
 	UpdateBookingStatus(orderID string, status string) error
-	GetExpiredBookings(expiryTime time.Time) ([]models.Booking, error)
+	
+	// [NEW] Update ExpiredAt saat initiate payment
+	UpdateBookingExpiry(orderID string, newExpiry time.Time) error
+	
+	GetExpiredBookings(currentTime time.Time) ([]models.Booking, error)
 	CancelBookingAtomic(booking *models.Booking) error
 	GetByUserID(userID uint) ([]models.Booking, error)
-    UpdatePastBookingsToExpired() error
+	UpdatePastBookingsToExpired() error
 }
 
 type bookingRepository struct {
@@ -29,10 +40,32 @@ func NewBookingRepository(db *gorm.DB) BookingRepository {
 	return &bookingRepository{db}
 }
 
+// [NEW IMPLEMENTATION] Get Single Booking for Payment
+func (r *bookingRepository) GetBookingByOrderID(orderID string) (*models.Booking, error) {
+	var booking models.Booking
+	// Ambil data booking berdasarkan Order ID (ORD-...)
+	// Kita ambil record pertama saja karena TotalPrice biasanya sama untuk satu Order ID
+	err := r.db.Where("order_id = ?", orderID).First(&booking).Error
+	if err != nil {
+		return nil, err
+	}
+	return &booking, nil
+}
+
+// [NEW IMPLEMENTATION] Update Expiry
+func (r *bookingRepository) UpdateBookingExpiry(orderID string, newExpiry time.Time) error {
+	// Update ExpiredAt menjadi waktu absolut dari Xendit
+	return r.db.Model(&models.Booking{}).
+		Where("order_id = ?", orderID).
+		Update("expired_at", newExpiry).Error
+}
+
+// --- EXISTING FUNCTIONS (REFACTORED FOR STRICT EXPIRY) ---
+
 func (r *bookingRepository) CreateOrder(bookings []models.Booking) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		for i := range bookings {
-			booking := &bookings[i] 
+			booking := &bookings[i]
 
 			if len(booking.Details) == 0 {
 				return errors.New("booking details/passengers cannot be empty")
@@ -41,6 +74,7 @@ func (r *bookingRepository) CreateOrder(bookings []models.Booking) error {
 			seatClass := booking.Details[0].SeatClass
 			passengerCount := len(booking.Details)
 
+			// Decrement Flight Class Seats
 			result := tx.Model(&models.FlightClass{}).
 				Where("flight_id = ? AND seat_class = ? AND total_seats >= ?",
 					booking.FlightID, seatClass, passengerCount).
@@ -58,18 +92,15 @@ func (r *bookingRepository) CreateOrder(bookings []models.Booking) error {
 				return err
 			}
 		}
-
-		return nil 
+		return nil
 	})
 }
 
 func (r *bookingRepository) FindBookingsByOrderID(orderID string) ([]models.Booking, error) {
 	var bookings []models.Booking
-
 	err := r.db.Preload("Details").Preload("Flight").
 		Where("order_id = ?", orderID).
 		Find(&bookings).Error
-
 	return bookings, err
 }
 
@@ -82,10 +113,9 @@ func (r *bookingRepository) UpdateBookingStatus(orderID string, status string) e
 		Scan(&currentStatus).Error
 
 	if err != nil {
-		return err 
+		return err
 	}
 
-	
 	if currentStatus == models.BookingStatusCancelled {
 		return ErrBookingAlreadyCancelled
 	}
@@ -95,11 +125,14 @@ func (r *bookingRepository) UpdateBookingStatus(orderID string, status string) e
 		Update("status", status).Error
 }
 
-func (r *bookingRepository) GetExpiredBookings(expiryTime time.Time) ([]models.Booking, error) {
+// [REFACTORED] Menggunakan expired_at bukan created_at
+func (r *bookingRepository) GetExpiredBookings(currentTime time.Time) ([]models.Booking, error) {
 	var bookings []models.Booking
-
+	
+	// Query: Cari booking PENDING yang expired_at < NOW()
+	// Jika expired_at NULL (migrasi lama), fallback ke created_at logic (opsional, tapi sebaiknya strict)
 	err := r.db.Preload("Details").
-		Where("status = ? AND created_at < ?", models.BookingStatusPending, expiryTime).
+		Where("status = ? AND expired_at < ?", models.BookingStatusPending, currentTime).
 		Find(&bookings).Error
 		
 	return bookings, err
@@ -107,17 +140,19 @@ func (r *bookingRepository) GetExpiredBookings(expiryTime time.Time) ([]models.B
 
 func (r *bookingRepository) CancelBookingAtomic(booking *models.Booking) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
-
+		// 1. Update Booking Status
 		if err := tx.Model(booking).Update("status", models.BookingStatusCancelled).Error; err != nil {
 			return err
 		}
 
+		// 2. Update Payment Status (Jika ada) - Menggunakan OrderID
 		if err := tx.Model(&models.Payment{}).
 			Where("order_id = ?", booking.OrderID).
 			Update("payment_status", models.PaymentStatusExpired).Error; err != nil {
-			return err
+			// Ignore error if payment not found, just continue cancellation
 		}
 
+		// 3. Restock Seats
 		if len(booking.Details) > 0 {
 			seatClass := booking.Details[0].SeatClass
 			passengerCount := len(booking.Details)
@@ -128,54 +163,38 @@ func (r *bookingRepository) CancelBookingAtomic(booking *models.Booking) error {
 				return err
 			}
 		}
-
 		return nil
 	})
 }
 
-// [NEW] Implementasi GetByUserID dengan Eager Loading Gila-gilaan
 func (r *bookingRepository) GetByUserID(userID uint) ([]models.Booking, error) {
 	var bookings []models.Booking
-
-	// Kita butuh Preload bertingkat untuk mengambil data Flight, Airline, Airport, dan Payment
-	// Payment di-join manual (bukan preload) kadang lebih efisien, tapi Preload GORM lebih rapi untuk case ini.
-    // Asumsi: Di model Booking belum ada relasi Payment, nanti kita cek/tambahkan.
-    // Untuk sekarang kita preload Flight dkk dulu.
-    
 	err := r.db.
 		Preload("Flight").
 		Preload("Flight.Airline").
 		Preload("Flight.OriginAirport").
 		Preload("Flight.DestinationAirport").
-		Preload("Flight.FlightClasses"). // [BARU] Perlu ini untuk cari ClassCode (I9)
-		Preload("Details").              // [BARU] Perlu ini untuk tahu SeatClass user
+		Preload("Flight.FlightClasses").
+		Preload("Details").
 		Where("user_id = ?", userID).
-		Order("created_at DESC"). // Paling baru di atas
+		Order("created_at DESC").
 		Find(&bookings).Error
 
 	if err != nil {
 		return nil, err
 	}
-
 	return bookings, nil
 }
 
-// [NEW IMPLEMENTATION]
-// Mengubah status booking 'paid' menjadi 'expired' jika waktu kedatangan penerbangan < waktu sekarang
 func (r *bookingRepository) UpdatePastBookingsToExpired() error {
-    // Menggunakan Raw SQL agar performa tinggi (Bulk Update)
-    // Asumsi: Database PostgreSQL
-    query := `
-        UPDATE bookings
-        SET status = ?
-        FROM flights
-        WHERE bookings.flight_id = flights.id
-        AND bookings.status = ?
-        AND flights.arrival_time < ?
-    `
-    // Parameter: Status Baru ('expired'), Status Lama ('paid'), Waktu Sekarang
-    // Pastikan string status sesuai dengan enum di model kamu (misal: "expired", "paid")
-    err := r.db.Exec(query, models.BookingStatusExpired, models.BookingStatusPaid, time.Now()).Error
-    
-    return err
+	query := `
+		UPDATE bookings
+		SET status = ?
+		FROM flights
+		WHERE bookings.flight_id = flights.id
+		AND bookings.status = ?
+		AND flights.arrival_time < ?
+	`
+	err := r.db.Exec(query, models.BookingStatusExpired, models.BookingStatusPaid, time.Now()).Error
+	return err
 }
