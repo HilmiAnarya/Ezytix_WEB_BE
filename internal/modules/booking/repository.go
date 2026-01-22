@@ -148,7 +148,7 @@ func (r *bookingRepository) CancelBookingAtomic(booking *models.Booking) error {
 		// 2. Update Payment Status (Jika ada) - Menggunakan OrderID
 		if err := tx.Model(&models.Payment{}).
 			Where("order_id = ?", booking.OrderID).
-			Update("payment_status", models.PaymentStatusExpired).Error; err != nil {
+			Update("payment_status", models.PaymentStatusExpire).Error; err != nil {
 			// Ignore error if payment not found, just continue cancellation
 		}
 

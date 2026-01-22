@@ -2,38 +2,40 @@ package payment
 
 import (
 	"ezytix-be/internal/middleware"
-	"ezytix-be/internal/modules/booking" // Import modul booking
+	"ezytix-be/internal/modules/booking" // Import Booking Module
 	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
 )
 
+// PaymentRegisterRoutes adalah entry point yang dipanggil oleh server/router.go
 func PaymentRegisterRoutes(app *fiber.App, db *gorm.DB) {
-	// 1. Setup Repository
+	// 1. Wiring Repository
 	paymentRepo := NewPaymentRepository(db)
 	
-	// Kita butuh Booking Repo untuk validasi orderID & Amount
-	// Inisialisasi on-the-fly di sini agar tidak perlu ubah main.go
+	// Kita butuh Booking Repository untuk Service Payment
+	// Asumsi: Modul Booking punya constructor NewBookingRepository yang menerima DB
 	bookingRepo := booking.NewBookingRepository(db) 
 
-	// 2. Setup Service
-	// Masukkan bookingRepo sebagai parameter kedua
-	service := NewPaymentService(paymentRepo, bookingRepo)
-	
-	// 3. Setup Handler
-	handler := NewPaymentHandler(service)
+	// 2. Wiring Service
+	// bookingRepo otomatis memenuhi interface BookingServiceContract 
+	// (Asal method GetBookingByOrderID & UpdateBookingStatus ada di bookingRepo)
+	paymentService := NewPaymentService(paymentRepo, bookingRepo)
 
-	// ==========================================
-	// 4. DEFINE ROUTES
-	// ==========================================
-	
-	// Group API Payment
+	// 3. Wiring Handler
+	paymentHandler := NewPaymentHandler(paymentService)
+
+	// 4. Grouping Routes
 	api := app.Group("/api/v1/payments")
 
-	// Endpoint Initiate Payment (Butuh Login)
-	// POST /api/v1/payments/initiate
-	api.Post("/initiate", middleware.JWTMiddleware, handler.InitiatePayment)
+	// ==========================================
+	// ROUTES
+	// ==========================================
 
-	// Endpoint Webhook (Public - Dipanggil Xendit)
-	// POST /api/v1/payments/webhook
-	api.Post("/webhook", handler.HandleWebhook)
+	// A. Protected Routes (Butuh Login)
+	// Menggunakan middleware.JWTMiddleware sesuai standar project kamu
+	api.Post("/initiate", middleware.JWTMiddleware, paymentHandler.InitiatePayment)
+
+	// B. Public Routes (Webhook Midtrans)
+	// TIDAK BOLEH pakai middleware auth, karena Midtrans yang akses
+	api.Post("/webhook", paymentHandler.HandleWebhook)
 }

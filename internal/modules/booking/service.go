@@ -11,6 +11,8 @@ import (
 	"ezytix-be/internal/models"
 	"ezytix-be/internal/modules/auth"
 	"ezytix-be/internal/modules/flight"
+	"ezytix-be/internal/utils"
+
 	// [REMOVED] import "ezytix-be/internal/modules/payment"
 
 	"github.com/shopspring/decimal"
@@ -197,12 +199,13 @@ func (s *bookingService) GetUserBookings(userID uint) ([]MyBookingResponse, erro
 
 	var responses []MyBookingResponse
 	for _, b := range bookings {
-		duration := b.Flight.ArrivalTime.Sub(b.Flight.DepartureTime)
-
+		
+		// 1. Mapping Flight Detail
 		var seatClass, classCode string
 		if len(b.Details) > 0 {
 			seatClass = b.Details[0].SeatClass
 		}
+		// Cari Class Code (Sub-class)
 		for _, fc := range b.Flight.FlightClasses {
 			if strings.EqualFold(fc.SeatClass, seatClass) {
 				classCode = fc.ClassCode
@@ -211,33 +214,49 @@ func (s *bookingService) GetUserBookings(userID uint) ([]MyBookingResponse, erro
 		}
 
 		flightDetail := BookingFlightDetail{
-			FlightCode:      b.Flight.FlightCode,
-			AirlineName:     b.Flight.Airline.Name,
-			AirlineLogo:     b.Flight.Airline.LogoURL,
-			Origin:          fmt.Sprintf("%s (%s)", b.Flight.OriginAirport.CityName, b.Flight.OriginAirport.Code),
-			Destination:     fmt.Sprintf("%s (%s)", b.Flight.DestinationAirport.CityName, b.Flight.DestinationAirport.Code),
-			DepartureTime:   b.Flight.DepartureTime,
-			ArrivalTime:     b.Flight.ArrivalTime,
-			DurationMinutes: int(duration.Minutes()),
-			SeatClass:       seatClass,
-			ClassCode:       classCode,
+			FlightCode:        b.Flight.FlightCode,
+			AirlineName:       b.Flight.Airline.Name,
+			AirlineLogo:       b.Flight.Airline.LogoURL,
+			Origin:            fmt.Sprintf("%s (%s)", b.Flight.OriginAirport.CityName, b.Flight.OriginAirport.Code),
+			Destination:       fmt.Sprintf("%s (%s)", b.Flight.DestinationAirport.CityName, b.Flight.DestinationAirport.Code),
+			DepartureTime:     b.Flight.DepartureTime,
+			ArrivalTime:       b.Flight.ArrivalTime,
+			
+			// [UPDATED] Ambil data langsung dari Model Flight & Utils
+			DurationMinutes:   b.Flight.TotalDuration, 
+			DurationFormatted: utils.FormatDuration(b.Flight.TotalDuration),
+			TransitInfo:       b.Flight.TransitInfo, // Ambil dari DB ("Direct", "1 Transit")
+			
+			SeatClass:         seatClass,
+			ClassCode:         classCode,
 		}
 
-		// [FIXED] Expiry Time diambil langsung dari DB (Strict Expiry)
-		// Tidak perlu logic hitung-hitungan manual lagi
+		// 2. Mapping Passengers (NEW)
+		var passengerList []PassengerDetailResponse
+		for _, detail := range b.Details {
+			passengerList = append(passengerList, PassengerDetailResponse{
+				FullName:     detail.PassengerName,
+				Type:         detail.PassengerType, // adult/child/infant
+				TicketNumber: detail.TicketNumber,
+				SeatClass:    detail.SeatClass,
+			})
+		}
+
+		// 3. Expiry Logic
 		var expiryTime *time.Time
 		if b.Status == models.BookingStatusPending {
 			expiryTime = b.ExpiredAt
 		}
 
 		resp := MyBookingResponse{
-			OrderID:     b.OrderID, // [ADDED] Agar frontend history bisa redirect ke payment
+			OrderID:     b.OrderID,
 			BookingCode: b.BookingCode,
 			Status:      b.Status,
 			TotalAmount: b.TotalPrice,
 			CreatedAt:   b.CreatedAt,
 			ExpiryTime:  expiryTime,
 			Flight:      flightDetail,
+			Passengers:  passengerList, // Masukkan list penumpang
 		}
 		responses = append(responses, resp)
 	}

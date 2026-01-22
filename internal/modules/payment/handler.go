@@ -1,6 +1,8 @@
 package payment
 
 import (
+	"strings"
+
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -12,82 +14,65 @@ func NewPaymentHandler(service PaymentService) *PaymentHandler {
 	return &PaymentHandler{service}
 }
 
-// ================================================
-// 1. INITIATE PAYMENT (Dipanggil Frontend)
-// ================================================
+// POST /api/v1/payments/initiate
 func (h *PaymentHandler) InitiatePayment(c *fiber.Ctx) error {
 	var req InitiatePaymentRequest
-
-	// Parsing JSON Payload dari Frontend
+	
+	// 1. Parse Body
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"status":  "error",
-			"message": "invalid request body",
-			"error":   err.Error(),
+			"message": "Invalid request body",
 		})
 	}
 
-	// Validasi Input (Manual Check)
-	if req.OrderID == "" || req.PaymentMethod == "" || req.PaymentType == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"status":  "error",
-			"message": "missing required fields (order_id, payment_method, payment_type)",
-		})
-	}
-
-	// Panggil Service
+	// 2. Call Service
 	resp, err := h.service.InitiatePayment(req)
 	if err != nil {
-		// Kita bisa improve dengan check error type, tapi sementara 500 dulu
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+		// Mapping HTTP Status Code manual
+		status := fiber.StatusBadRequest
+		
+		if strings.Contains(err.Error(), "booking not found") {
+			status = fiber.StatusNotFound
+		} else if strings.Contains(err.Error(), "already paid") {
+			status = fiber.StatusConflict
+		} else if strings.Contains(err.Error(), "expired") {
+			status = fiber.StatusGone
+		}
+
+		return c.Status(status).JSON(fiber.Map{
 			"status":  "error",
-			"message": "failed to initiate payment",
-			"error":   err.Error(),
+			"message": err.Error(),
 		})
 	}
 
+	// 3. Success Response (Manual Fiber Map)
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"status":  "success",
-		"message": "payment initiated successfully",
+		"message": "Payment initiated successfully",
 		"data":    resp,
 	})
 }
 
-// ================================================
-// 2. WEBHOOK HANDLER (Dipanggil Xendit)
-// ================================================
+// POST /api/v1/payments/webhook
 func (h *PaymentHandler) HandleWebhook(c *fiber.Ctx) error {
-	// Ambil Token Verifikasi dari Header
-	webhookToken := c.Get("x-callback-token")
-	if webhookToken == "" {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"status":  "error",
-			"message": "missing x-callback-token header",
-		})
-	}
-
-	// Parsing Payload Dinamis (Map)
 	var payload map[string]interface{}
+
+	// 1. Parse Payload JSON dari Midtrans
 	if err := c.BodyParser(&payload); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"status":  "error",
-			"message": "invalid webhook payload",
-			"error":   err.Error(),
+			"message": "Invalid webhook payload",
 		})
 	}
 
-	// Proses Webhook di Service
-	if err := h.service.ProcessWebhook(payload, webhookToken); err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+	// 2. Process di Service
+	if err := h.service.ProcessWebhook(payload); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"status":  "error",
-			"message": "failed to process webhook",
-			"error":   err.Error(),
+			"message": err.Error(),
 		})
 	}
 
-	// Return 200 OK agar Xendit tidak retry
-	return c.Status(fiber.StatusOK).JSON(fiber.Map{
-		"status":  "success",
-		"message": "webhook processed successfully",
-	})
+	// 3. Return 200 OK (Wajib untuk Midtrans)
+	return c.SendStatus(fiber.StatusOK)
 }

@@ -7,7 +7,7 @@ import (
 )
 
 // ==========================================
-// REQUEST (INPUT)
+// REQUEST (INPUT) - TIDAK BERUBAH
 // ==========================================
 
 type PassengerRequest struct {
@@ -31,7 +31,7 @@ type CreateOrderRequest struct {
 }
 
 // ==========================================
-// RESPONSE (OUTPUT)
+// RESPONSE (OUTPUT) - UPDATED 🚀
 // ==========================================
 
 type BookingDetailResponse struct {
@@ -44,33 +44,39 @@ type BookingDetailResponse struct {
 	TotalPrice      decimal.Decimal `json:"total_price"`
 }
 
-// [REFACTORED] Response Create Booking
-// Hapus PaymentURL karena pembayaran dilakukan di step terpisah
 type BookingResponse struct {
-	OrderID         string                  `json:"order_id"` // Kunci utama untuk redirect ke payment page
+	OrderID         string                  `json:"order_id"`
 	TotalAmount     decimal.Decimal         `json:"total_amount"`
-	Status          string                  `json:"status"` // Akan selalu "pending" saat baru dibuat
+	Status          string                  `json:"status"`
 	TransactionTime time.Time               `json:"transaction_time"`
-	ExpiryTime 		*time.Time `json:"expiry_time,omitempty"` // Batas waktu pembayaran (sebelum scheduler jalan)
+	ExpiryTime      *time.Time              `json:"expiry_time,omitempty"`
 	Bookings        []BookingDetailResponse `json:"bookings"`
 }
 
-// [REFACTORED] Response History
-type MyBookingResponse struct {
-	OrderID     string          `json:"order_id"` // [ADDED] Penting untuk tombol "Bayar" di history
-	BookingCode string          `json:"booking_code"`
-	Status      string          `json:"status"` // pending, paid, cancelled, failed
-	TotalAmount decimal.Decimal `json:"total_amount"`
-	CreatedAt   time.Time       `json:"created_at"`
-
-	// [REMOVED] PaymentUrl dihapus.
-	// Jika status "pending", Frontend akan pakai BookingCode untuk redirect ke halaman /payment/:id/select
-	ExpiryTime *time.Time `json:"expiry_time,omitempty"`
-
-	// Data Penerbangan
-	Flight BookingFlightDetail `json:"flight"`
+// [NEW] Struct untuk Detail Penumpang di History
+type PassengerDetailResponse struct {
+	FullName      string `json:"full_name"`
+	Type          string `json:"type"`           // adult, child, infant
+	TicketNumber  string `json:"ticket_number"`  // Nomor Tiket
+	SeatClass     string `json:"seat_class"`
 }
 
+// [UPDATED] Response History
+type MyBookingResponse struct {
+	OrderID     string          `json:"order_id"`
+	BookingCode string          `json:"booking_code"`
+	Status      string          `json:"status"`
+	TotalAmount decimal.Decimal `json:"total_amount"`
+	CreatedAt   time.Time       `json:"created_at"`
+	ExpiryTime  *time.Time      `json:"expiry_time,omitempty"`
+
+	Flight     BookingFlightDetail       `json:"flight"`
+	
+	// [NEW] List Penumpang
+	Passengers []PassengerDetailResponse `json:"passengers"` 
+}
+
+// [UPDATED] Detail Penerbangan
 type BookingFlightDetail struct {
 	FlightCode      string    `json:"flight_code"`
 	AirlineName     string    `json:"airline_name"`
@@ -79,7 +85,13 @@ type BookingFlightDetail struct {
 	Destination     string    `json:"destination"`
 	DepartureTime   time.Time `json:"departure_time"`
 	ArrivalTime     time.Time `json:"arrival_time"`
+	
 	DurationMinutes int       `json:"duration_minutes"`
+	
+	// [NEW] Fields untuk mendukung UI baru
+	DurationFormatted string  `json:"duration_formatted"` 
+	TransitInfo       string  `json:"transit_info"`
+	
 	SeatClass       string    `json:"seat_class"`
 	ClassCode       string    `json:"class_code"`
 }

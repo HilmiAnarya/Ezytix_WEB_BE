@@ -1,323 +1,318 @@
 package payment
 
 import (
-	"context"
+	"crypto/sha512"
+	"encoding/hex"
 	"errors"
-	"log"
-	"strings"
+	"fmt"
 	"time"
 
 	"ezytix-be/internal/config"
 	"ezytix-be/internal/models"
 
-	"github.com/xendit/xendit-go/v6"
-	"github.com/xendit/xendit-go/v6/payment_request"
+	"github.com/midtrans/midtrans-go"
+	"github.com/midtrans/midtrans-go/coreapi"
 )
 
 // ==========================================
-// 1. DEFINISI INTERFACE
+// 1. DEPENDENCY CONTRACT
 // ==========================================
-
-// BookingDataAccessor: Hanya ambil data dan update status.
-// TIDAK ADA fungsi update expiry, karena Expiry Booking bersifat STRICT/IMMUTABLE.
-type BookingDataAccessor interface {
-	UpdateBookingStatus(orderID string, status string) error
+// Agar Payment tidak bergantung langsung pada Booking (Loose Coupling)
+type BookingServiceContract interface {
 	GetBookingByOrderID(orderID string) (*models.Booking, error)
+	UpdateBookingStatus(orderID string, status string) error
 }
 
 type PaymentService interface {
 	InitiatePayment(req InitiatePaymentRequest) (*InitiatePaymentResponse, error)
-	ProcessWebhook(payload map[string]interface{}, webhookToken string) error
-	FindPaymentByOrderID(orderID string) (*models.Payment, error)
+	ProcessWebhook(payload map[string]interface{}) error
 }
 
 type paymentService struct {
-	repo         PaymentRepository
-	bookingRepo  BookingDataAccessor
-	xenditClient *xendit.APIClient
+	repo           PaymentRepository
+	bookingRepo    BookingServiceContract
+	midtransClient coreapi.Client
 }
 
-func NewPaymentService(repo PaymentRepository, bookingRepo BookingDataAccessor) PaymentService {
-	client := xendit.NewClient(config.AppConfig.XenditSecretKey)
+func NewPaymentService(repo PaymentRepository, bookingRepo BookingServiceContract) PaymentService {
+	// 1. Init Client Midtrans
+	var client coreapi.Client
+	
+	// Tentukan Environment (Sandbox / Production)
+	env := midtrans.Sandbox
+	if config.AppConfig.MidtransIsProduction {
+		env = midtrans.Production
+	}
+
+	client.New(config.AppConfig.MidtransServerKey, env)
+
 	return &paymentService{
-		repo:         repo,
-		bookingRepo:  bookingRepo,
-		xenditClient: client,
+		repo:           repo,
+		bookingRepo:    bookingRepo,
+		midtransClient: client,
 	}
 }
 
 // ==========================================
-// 2. INITIATE PAYMENT (BRAIN OF THE OPERATION)
+// 2. CORE LOGIC: INITIATE PAYMENT
 // ==========================================
+
 func (s *paymentService) InitiatePayment(req InitiatePaymentRequest) (*InitiatePaymentResponse, error) {
-	// 1. Ambil Data Booking
+	// A. Validasi Booking
 	booking, err := s.bookingRepo.GetBookingByOrderID(req.OrderID)
 	if err != nil {
 		return nil, errors.New("booking not found")
 	}
-
-	// 2. [STRICT VALIDATION] Cek Expiry Booking
-	if booking.ExpiredAt == nil {
-		return nil, errors.New("booking expiry data is corrupt")
+	if booking.Status == models.BookingStatusPaid {
+		return nil, errors.New("booking already paid")
 	}
-	
-	timeRemaining := time.Until(*booking.ExpiredAt)
-	
-	// A. Jika sudah expired
-	if timeRemaining <= 0 {
-		return nil, errors.New("booking has expired, please create a new order")
+	// Cek Expiry (Asumsi booking expiredAt valid)
+	if booking.ExpiredAt != nil && time.Now().After(*booking.ExpiredAt) {
+		return nil, errors.New("booking expired")
 	}
 
-	// B. Jika waktu terlalu mepet (< 5 menit), tolak demi keamanan
-	if timeRemaining < 5*time.Minute {
-		return nil, errors.New("payment window closing soon (less than 5 mins), please create a new order")
-	}
-
-	// 3. Cek Idempotency (Existing Payment)
-	existingPayment, _ := s.repo.FindPaymentByOrderID(req.OrderID)
-	if existingPayment != nil && existingPayment.PaymentStatus == models.PaymentStatusPending {
-		// Jika metode sama, return data lama
-		if existingPayment.PaymentMethod == req.PaymentMethod {
-			return &InitiatePaymentResponse{
-				OrderID:       existingPayment.OrderID,
-				PaymentMethod: existingPayment.PaymentMethod,
-				PaymentCode:   existingPayment.PaymentCode,
-				QrString:      existingPayment.QrString,
-				DeepLink:      existingPayment.PaymentUrl,
-				Amount:        booking.TotalPrice.InexactFloat64(),
-				ExpiryTime:    *existingPayment.ExpiryTime, // Tetap gunakan expiry lama (karena sama dengan booking)
-				Status:        models.PaymentStatusPending,
-			}, nil
+	// B. Idempotency Check (Cek database lokal dulu)
+	// Jika user klik bayar 2x dengan metode yang sama, jangan tembak Midtrans lagi.
+	existing, _ := s.repo.FindPaymentByOrderID(req.OrderID)
+	if existing != nil && existing.TransactionStatus == "pending" {
+		// Jika metode sama (Misal: User pilih BCA lagi), kembalikan data lama
+		// Note: Logic ini bisa diperkaya, misal cek expired time payment-nya juga
+		if existing.PaymentType == req.PaymentType {
+			return s.constructResponseFromModel(existing), nil
 		}
-		// Jika metode beda, kita akan overwrite di DB (Last Win Strategy)
 	}
 
-	// 4. Routing ke Xendit API
-	// Kita passing Expiry Booking ke Xendit agar VA mati bersamaan dengan Booking
-	bookingExpiry := *booking.ExpiredAt
-	amountFloat := booking.TotalPrice.InexactFloat64()
-	var resp *InitiatePaymentResponse
+	// C. Siapkan Parameter Midtrans (Core API)
+	// Hitung Gross Amount (int64 required by Midtrans)
+	grossAmt := int64(booking.TotalPrice.InexactFloat64())
+	
+	chargeReq := &coreapi.ChargeReq{
+		PaymentType: coreapi.CoreapiPaymentType(req.PaymentType), // bank_transfer, echannel, qris, gopay
+		TransactionDetails: midtrans.TransactionDetails{
+			OrderID:  req.OrderID,
+			GrossAmt: grossAmt,
+		},
+		CustomExpiry: &coreapi.CustomExpiry{
+			OrderTime:      time.Now().Format("2006-01-02 15:04:05"),
+			ExpiryDuration: 60, // Set expired 60 menit (sesuaikan kebutuhan)
+			Unit:           "minute",
+		},
+		Metadata: map[string]interface{}{
+			"user_id": fmt.Sprintf("%d", booking.UserID),
+		},
+	}
 
+	// D. Switch Case: Konfigurasi Spesifik per Metode
 	switch req.PaymentType {
-	case "VIRTUAL_ACCOUNT":
-		resp, err = s.createFixedVA(req, amountFloat, bookingExpiry)
-	case "QR_CODE":
-		// QRIS Xendit V6 mungkin tidak support set expiry spesifik per request.
-		// Jadi kita hanya passing untuk kebutuhan struct response backend.
-		resp, err = s.createQRCode(req, amountFloat, bookingExpiry)
+	case "bank_transfer":
+		// BCA, BNI, BRI
+		chargeReq.BankTransfer = &coreapi.BankTransferDetails{
+			Bank: midtrans.Bank(req.Bank), // bca, bni, bri
+		}
+	case "echannel":
+		// Mandiri Bill Payment
+		chargeReq.EChannel = &coreapi.EChannelDetail{
+			BillInfo1: "Payment For:",
+			BillInfo2: "Flight Ticket",
+		}
+	case "qris":
+		// QRIS
+		chargeReq.Qris = &coreapi.QrisDetails{
+			Acquirer: "gopay", // Default acquirer
+		}
+	case "gopay":
+		// GoPay (DeepLink)
+		chargeReq.Gopay = &coreapi.GopayDetails{
+			EnableCallback: true,
+			CallbackUrl:    config.AppConfig.FrontendURL + "/payment-finish", // Redirect setelah bayar di app Gojek
+		}
 	default:
-		return nil, errors.New("payment type not supported")
+		return nil, errors.New("unsupported payment type")
 	}
 
+	// E. Eksekusi Charge ke Midtrans
+	resp, err := s.midtransClient.ChargeTransaction(chargeReq)
 	if err != nil {
-		return nil, err
+		// Handle error dari Midtrans (misal: Server Key salah, validasi gagal)
+		return nil, fmt.Errorf("midtrans error: %v", err)
 	}
 
-	// 5. Simpan Payment ke Database
+	// F. Mapping Response & Save DB
+	return s.saveAndRespond(booking, req, resp)
+}
+
+// ==========================================
+// 3. HELPERS: RESPONSE PARSING & SAVING
+// ==========================================
+
+func (s *paymentService) saveAndRespond(booking *models.Booking, req InitiatePaymentRequest, resp *coreapi.ChargeResponse) (*InitiatePaymentResponse, error) {
+	
+	// Variables untuk menampung hasil ekstraksi
+	var vaNumber, bank, billKey, billerCode, qrUrl, deeplink string
+
+	// 1. Ekstraksi Data (Tergantung Tipe)
+	switch req.PaymentType {
+	case "bank_transfer":
+		if len(resp.VaNumbers) > 0 {
+			vaNumber = resp.VaNumbers[0].VANumber
+			bank = resp.VaNumbers[0].Bank
+		} else if resp.PermataVaNumber != "" { // Permata kadang beda field
+			vaNumber = resp.PermataVaNumber
+			bank = "permata"
+		}
+	case "echannel":
+		billKey = resp.BillKey
+		billerCode = resp.BillerCode
+	case "qris", "gopay":
+		// Cari URL di Actions (standar Core API v2)
+		for _, action := range resp.Actions {
+			if action.Name == "generate-qr-code" {
+				qrUrl = action.URL
+			}
+			if action.Name == "deeplink-redirect" {
+				deeplink = action.URL
+			}
+		}
+	}
+
+	// 2. Simpan ke Database
+	// Parse Transaction Time / Expiry Time dari Midtrans string
+	// Format Midtrans: "2006-01-02 15:04:05"
+	expiryTime, _ := time.Parse("2006-01-02 15:04:05", resp.ExpiryTime)
+	
 	paymentModel := &models.Payment{
-		OrderID:        req.OrderID,
-		XenditID:       "PR-" + req.OrderID, // Bisa diganti ID asli dari resp Xendit jika perlu
-		PaymentMethod:  req.PaymentMethod,
-		PaymentChannel: req.PaymentType,
-		PaymentStatus:  models.PaymentStatusPending,
-		Amount:         booking.TotalPrice,
-		PaymentCode:    resp.PaymentCode,
-		QrString:       resp.QrString,
-		PaymentUrl:     resp.DeepLink,
-		ExpiryTime:     &bookingExpiry, // Payment Expiry = Booking Expiry
+		OrderID:           req.OrderID,
+		TransactionID:     resp.TransactionID,
+		PaymentType:       req.PaymentType,
+		GrossAmount:       booking.TotalPrice, // Pakai decimal dari booking
+		TransactionStatus: resp.TransactionStatus,
+		
+		Bank:       bank,
+		VaNumber:   vaNumber,
+		BillKey:    billKey,
+		BillerCode: billerCode,
+		QrUrl:      qrUrl,
+		Deeplink:   deeplink,
+		
+		ExpiryTime: &expiryTime,
 	}
 
-	// Upsert Logic
 	if err := s.repo.CreatePayment(paymentModel); err != nil {
 		return nil, err
 	}
 
-	return resp, nil
+	// 3. Return DTO Response
+	return s.constructResponseFromModel(paymentModel), nil
 }
 
-// --- HELPER: Create Virtual Account ---
-func (s *paymentService) createFixedVA(req InitiatePaymentRequest, amount float64, expiryTime time.Time) (*InitiatePaymentResponse, error) {
-	currency := payment_request.PAYMENTREQUESTCURRENCY_IDR
-
-	// A. Main Params
-	pr := *payment_request.NewPaymentRequestParameters(currency)
-	pr.SetAmount(amount)
-	pr.SetReferenceId(req.OrderID)
-
-	// B. Channel Properties
-	channelProps := *payment_request.NewVirtualAccountChannelProperties("Ezytix Customer")
-	
-	// [STRICT] Set Expiry VA SAMA PERSIS dengan Booking Expiry
-	channelProps.SetExpiresAt(expiryTime)
-
-	// C. Channel Code
-	channelCode := payment_request.VirtualAccountChannelCode(req.PaymentMethod)
-
-	// D. VA Params
-	vaParams := *payment_request.NewVirtualAccountParameters(channelCode, channelProps)
-
-	// E. Payment Method Params
-	pmParams := *payment_request.NewPaymentMethodParameters(
-		payment_request.PAYMENTMETHODTYPE_VIRTUAL_ACCOUNT,
-		payment_request.PAYMENTMETHODREUSABILITY_ONE_TIME_USE,
-	)
-	pmParams.SetVirtualAccount(vaParams)
-
-	pr.SetPaymentMethod(pmParams)
-
-	// F. Execute
-	resp, _, err := s.xenditClient.PaymentRequestApi.CreatePaymentRequest(context.Background()).
-		PaymentRequestParameters(pr).
-		Execute()
-
-	if err != nil {
-		log.Printf("Xendit VA Error: %v", err)
-		return nil, errors.New("failed to create virtual account")
+// Helper untuk mengubah Model DB menjadi DTO Response Frontend
+func (s *paymentService) constructResponseFromModel(p *models.Payment) *InitiatePaymentResponse {
+	resp := &InitiatePaymentResponse{
+		OrderID:           p.OrderID,
+		TransactionID:     p.TransactionID,
+		PaymentType:       p.PaymentType,
+		Amount:            p.GrossAmount.InexactFloat64(),
+		TransactionStatus: p.TransactionStatus,
 	}
 
-	// G. Parse Response
-	var vaNumber string
-	if resp.PaymentMethod.VirtualAccount.IsSet() {
-		vaData := resp.PaymentMethod.VirtualAccount.Get()
-		if vaData != nil && vaData.ChannelProperties.VirtualAccountNumber != nil {
-			vaNumber = *vaData.ChannelProperties.VirtualAccountNumber
+	if p.ExpiryTime != nil {
+		resp.ExpiryTime = *p.ExpiryTime
+	}
+
+	// Isi field dinamis berdasarkan tipe
+	switch p.PaymentType {
+	case "bank_transfer":
+		resp.VirtualAccount = &VirtualAccountData{
+			Bank:     p.Bank,
+			VaNumber: p.VaNumber,
+		}
+	case "echannel":
+		resp.MandiriBill = &MandiriBillData{
+			BillKey:    p.BillKey,
+			BillerCode: p.BillerCode,
+		}
+	case "qris":
+		resp.Qris = &QrisData{
+			QrUrl: p.QrUrl,
+		}
+	case "gopay":
+		resp.Gopay = &GopayData{
+			Deeplink: p.Deeplink,
 		}
 	}
 
-	if vaNumber == "" {
-		return nil, errors.New("xendit did not return VA number")
-	}
-
-	return &InitiatePaymentResponse{
-		OrderID:       req.OrderID,
-		PaymentMethod: req.PaymentMethod,
-		PaymentCode:   vaNumber,
-		Amount:        amount,
-		ExpiryTime:    expiryTime,
-		Status:        models.PaymentStatusPending,
-	}, nil
-}
-
-// --- HELPER: Create QR Code ---
-func (s *paymentService) createQRCode(req InitiatePaymentRequest, amount float64, expiryTime time.Time) (*InitiatePaymentResponse, error) {
-	currency := payment_request.PAYMENTREQUESTCURRENCY_IDR
-
-	// A. Main Params
-	pr := *payment_request.NewPaymentRequestParameters(currency)
-	pr.SetAmount(amount)
-	pr.SetReferenceId(req.OrderID)
-
-	// B. QR Params
-	qrParams := *payment_request.NewQRCodeParameters()
-	qrParams.SetChannelCode("QRIS")
-	
-	// Note: Xendit QRIS V6 tidak selalu support set expiry di level ini. 
-	// Jika tidak support, QRIS akan default 30 menit atau sesuai setting merchant.
-	// Namun Backend kita tetap menolak pembayaran jika booking expired.
-
-	// C. Payment Method Params
-	pmParams := *payment_request.NewPaymentMethodParameters(
-		payment_request.PAYMENTMETHODTYPE_QR_CODE,
-		payment_request.PAYMENTMETHODREUSABILITY_ONE_TIME_USE,
-	)
-	pmParams.SetQrCode(qrParams)
-
-	pr.SetPaymentMethod(pmParams)
-
-	// D. Execute
-	resp, _, err := s.xenditClient.PaymentRequestApi.CreatePaymentRequest(context.Background()).
-		PaymentRequestParameters(pr).
-		Execute()
-
-	if err != nil {
-		log.Printf("Xendit QR Error: %v", err)
-		return nil, errors.New("failed to create qr code")
-	}
-
-	// E. Parse Response
-	var qrString string
-	if resp.PaymentMethod.QrCode.IsSet() {
-		qrData := resp.PaymentMethod.QrCode.Get()
-		if qrData != nil && qrData.ChannelProperties.QrString != nil {
-			qrString = *qrData.ChannelProperties.QrString
-		}
-	}
-
-	if qrString == "" {
-		return nil, errors.New("xendit did not return QR string")
-	}
-
-	return &InitiatePaymentResponse{
-		OrderID:       req.OrderID,
-		PaymentMethod: "QRIS",
-		QrString:      qrString,
-		Amount:        amount,
-		ExpiryTime:    expiryTime,
-		Status:        models.PaymentStatusPending,
-	}, nil
+	return resp
 }
 
 // ==========================================
-// 3. PROCESS WEBHOOK
+// 4. CORE LOGIC: WEBHOOK PROCESSOR
 // ==========================================
-func (s *paymentService) ProcessWebhook(payload map[string]interface{}, webhookToken string) error {
-	// A. Security Check
-	if webhookToken != config.AppConfig.XenditWebhookToken {
-		return errors.New("unauthorized webhook token")
+
+func (s *paymentService) ProcessWebhook(payload map[string]interface{}) error {
+	// 1. Ambil Data Kunci dari Payload
+	orderID, _ := payload["order_id"].(string)
+	statusCode, _ := payload["status_code"].(string)
+	grossAmount, _ := payload["gross_amount"].(string)
+	signatureKey, _ := payload["signature_key"].(string)
+	transactionStatus, _ := payload["transaction_status"].(string)
+	// fraudStatus, _ := payload["fraud_status"].(string) // Opsional cek fraud
+
+	if orderID == "" {
+		return errors.New("invalid webhook payload")
 	}
 
-	// B. Parse Event
-	eventType, ok := payload["event"].(string)
-	if !ok {
-		return nil 
-	}
-	
-	// C. Filter Event: Hanya peduli Payment Succeeded
-	// Jika Expired/Failed, kita biarkan saja (karena Booking otomatis expired oleh scheduler)
-	if eventType != "payment.succeeded" {
-		return nil 
+	// 2. VERIFIKASI SIGNATURE (Security Check Wajib)
+	// Rumus: SHA512(order_id + status_code + gross_amount + ServerKey)
+	input := orderID + statusCode + grossAmount + config.AppConfig.MidtransServerKey
+	hash := sha512.Sum512([]byte(input))
+	expectedSignature := hex.EncodeToString(hash[:])
+
+	if signatureKey != expectedSignature {
+		return errors.New("invalid signature key")
 	}
 
-	// D. Extract Data
-	data, _ := payload["data"].(map[string]interface{})
-	
-	referenceID, _ := data["reference_id"].(string) 
-	
-	if referenceID == "" {
-		// Fallback Xendit ID
-		xenditID, _ := data["id"].(string)
-		payment, err := s.repo.FindPaymentByXenditID(xenditID)
-		if err == nil {
-			referenceID = payment.OrderID
-		} else {
-			return errors.New("unknown transaction")
-		}
+	// 3. Tentukan Status Internal Aplikasi
+	var internalStatus string
+	var isPaid bool
+
+	switch transactionStatus {
+	case "capture":
+		// Khusus Kartu Kredit
+		internalStatus = models.PaymentStatusSettlement
+		isPaid = true
+	case "settlement":
+		// Uang sudah masuk (VA, E-Wallet, QRIS)
+		internalStatus = models.PaymentStatusSettlement
+		isPaid = true
+	case "pending":
+		internalStatus = models.PaymentStatusPending
+	case "deny", "cancel", "expire":
+		internalStatus = models.PaymentStatusCancel
+	default:
+		internalStatus = transactionStatus
 	}
 
-	// E. Update Status (Gatekeeper)
-	// Kita tidak perlu cek expiry di sini secara manual, karena BookingRepo.UpdateBookingStatus
-	// seharusnya menolak update jika status sudah CANCELLED/EXPIRED (Tergantung implementasi repo).
-	// Tapi untuk keamanan, kita update payment dulu.
-	
+	// 4. Update Database (Payment & Booking)
 	now := time.Now()
-	
-	// 1. Update Booking Status -> PAID
-	err := s.bookingRepo.UpdateBookingStatus(referenceID, models.BookingStatusPaid)
-	if err != nil {
-		// Jika Booking sudah dicancel Scheduler, kita tandai payment FAILED (Money In, No Ticket)
-		if strings.Contains(strings.ToLower(err.Error()), "cancelled") || strings.Contains(strings.ToLower(err.Error()), "expired") {
-			_ = s.repo.UpdatePaymentStatus(referenceID, models.PaymentStatusFailed, &now)
-			return nil
-		}
+	var paidAt *time.Time
+	if isPaid {
+		paidAt = &now
+	}
+
+	// Update Tabel Payment
+	if err := s.repo.UpdatePaymentStatus(orderID, internalStatus, paidAt); err != nil {
 		return err
 	}
 
-	// 2. Update Payment Status -> PAID
-	err = s.repo.UpdatePaymentStatus(referenceID, models.PaymentStatusPaid, &now)
-	
-	return err
-}
+	// Update Tabel Booking (Hanya jika Paid)
+	if isPaid {
+		if err := s.bookingRepo.UpdateBookingStatus(orderID, models.BookingStatusPaid); err != nil {
+			return err
+		}
+	} else if internalStatus == models.PaymentStatusCancel {
+		// Opsional: Release seat jika expired/cancel
+		// s.bookingRepo.UpdateBookingStatus(orderID, models.BookingStatusCancelled)
+	}
 
-func (s *paymentService) FindPaymentByOrderID(orderID string) (*models.Payment, error) {
-	return s.repo.FindPaymentByOrderID(orderID)
+	return nil
 }

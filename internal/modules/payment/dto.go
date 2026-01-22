@@ -1,40 +1,57 @@
 package payment
 
-import (
-	"time"
-)
+import "time"
 
 // ==========================================
-// 1. INITIATE PAYMENT (Frontend -> Backend)
+// 1. REQUEST (Input Frontend)
 // ==========================================
 
-// Request dari Frontend saat user klik "Bayar" setelah memilih metode
 type InitiatePaymentRequest struct {
-	OrderID       string `json:"order_id" validate:"required"`
-	PaymentMethod string `json:"payment_method" validate:"required"` // Contoh: "BCA", "MANDIRI", "OVO", "QRIS"
-	PaymentType   string `json:"payment_type" validate:"required"`   // Contoh: "VIRTUAL_ACCOUNT", "E_WALLET", "QR_CODE"
+	OrderID     string `json:"order_id" validate:"required"`
+	
+	// PaymentType: "bank_transfer", "echannel" (Mandiri), "qris", "gopay"
+	PaymentType string `json:"payment_type" validate:"required,oneof=bank_transfer echannel qris gopay"` 
+	
+	// Bank: Wajib diisi JIKA PaymentType = "bank_transfer"
+	// Value: "bca", "bni", "bri", "permata"
+	Bank        string `json:"bank" validate:"required_if=PaymentType bank_transfer"` 
 }
 
-// Response ke Frontend (Data untuk ditampilkan di Waiting Page)
+// ==========================================
+// 2. RESPONSE (Output ke Frontend)
+// ==========================================
+
 type InitiatePaymentResponse struct {
-	OrderID     string    `json:"order_id"`
-	PaymentMethod string  `json:"payment_method"`
-	
-	// Field dinamis tergantung metode bayar
-	PaymentCode string    `json:"payment_code,omitempty"` // Nomor VA (untuk Virtual Account)
-	QrString    string    `json:"qr_string,omitempty"`    // String QR (untuk QRIS)
-	DeepLink    string    `json:"deep_link,omitempty"`    // Link redirect app (untuk E-Wallet seperti ShopeePay/Gopay)
-	
-	Amount      float64   `json:"amount"`
-	ExpiryTime  time.Time `json:"expiry_time"`
-	Status      string    `json:"status"`
+	OrderID           string    `json:"order_id"`
+	TransactionID     string    `json:"transaction_id"`
+	PaymentType       string    `json:"payment_type"`
+	Amount            float64   `json:"amount"`
+	TransactionStatus string    `json:"transaction_status"`
+	ExpiryTime        time.Time `json:"expiry_time"`
+
+	// [DYNAMIC FIELDS]
+	// Pointer & omitempty: Field ini akan hilang dari JSON jika nil (tidak dipilih)
+	VirtualAccount *VirtualAccountData `json:"virtual_account,omitempty"`
+	MandiriBill    *MandiriBillData    `json:"mandiri_bill,omitempty"`
+	Qris           *QrisData           `json:"qris,omitempty"`
+	Gopay          *GopayData          `json:"gopay,omitempty"`
 }
 
-// ==========================================
-// 2. WEBHOOK DTO (Xendit -> Backend)
-// ==========================================
+// Struktur Data Spesifik per Metode
+type VirtualAccountData struct {
+	Bank     string `json:"bank"`
+	VaNumber string `json:"va_number"`
+}
 
-type XenditNotification struct {
-    Event string                 `json:"event"` // e.g., "payment.succeeded"
-    Data  map[string]interface{} `json:"data"`  // Isinya dinamis
+type MandiriBillData struct {
+	BillKey    string `json:"bill_key"`
+	BillerCode string `json:"biller_code"`
+}
+
+type QrisData struct {
+	QrUrl string `json:"qr_url"` // URL Gambar QR dari Midtrans
+}
+
+type GopayData struct {
+	Deeplink string `json:"deeplink"` // Link redirect ke Gojek
 }
