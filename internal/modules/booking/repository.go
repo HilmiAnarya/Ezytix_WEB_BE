@@ -7,6 +7,7 @@ import (
 
 	"ezytix-be/internal/models"
 
+	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 )
 
@@ -40,15 +41,32 @@ func NewBookingRepository(db *gorm.DB) BookingRepository {
 	return &bookingRepository{db}
 }
 
-// [NEW IMPLEMENTATION] Get Single Booking for Payment
+// [FIXED IMPLEMENTATION] Get Booking for Payment with SUM Logic
 func (r *bookingRepository) GetBookingByOrderID(orderID string) (*models.Booking, error) {
 	var booking models.Booking
-	// Ambil data booking berdasarkan Order ID (ORD-...)
-	// Kita ambil record pertama saja karena TotalPrice biasanya sama untuk satu Order ID
-	err := r.db.Where("order_id = ?", orderID).First(&booking).Error
+
+	// 1. Ambil Data Booking Pertama (untuk info UserID, ExpiredAt, FlightID, dll sebagai referensi)
+	if err := r.db.Where("order_id = ?", orderID).First(&booking).Error; err != nil {
+		return nil, err
+	}
+
+	// 2. [CRITICAL FIX] Hitung Total Harga dari SEMUA booking dengan OrderID ini
+	// Skenario: Round Trip (Pergi + Pulang) -> Ada 2 row di database.
+	// Kita harus menjumlahkan total_price keduanya agar User membayar full.
+	var totalAmount float64
+	err := r.db.Model(&models.Booking{}).
+		Where("order_id = ?", orderID).
+		Select("COALESCE(SUM(total_price), 0)"). // COALESCE agar tidak error jika null
+		Scan(&totalAmount).Error
+
 	if err != nil {
 		return nil, err
 	}
+
+	// 3. Override TotalPrice di struct booking dengan hasil penjumlahan
+	// Convert float64 ke decimal agar tipe datanya sesuai struct Payment Service
+	booking.TotalPrice = decimal.NewFromFloat(totalAmount)
+
 	return &booking, nil
 }
 
@@ -148,7 +166,7 @@ func (r *bookingRepository) CancelBookingAtomic(booking *models.Booking) error {
 		// 2. Update Payment Status (Jika ada) - Menggunakan OrderID
 		if err := tx.Model(&models.Payment{}).
 			Where("order_id = ?", booking.OrderID).
-			Update("payment_status", models.PaymentStatusExpire).Error; err != nil {
+			Update("transaction_status", models.PaymentStatusExpire).Error; err != nil {
 			// Ignore error if payment not found, just continue cancellation
 		}
 

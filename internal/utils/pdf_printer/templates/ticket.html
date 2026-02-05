@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>E-Tiket - Ezytix</title>
+  <style>
+    /* Reset & Base */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    
+    body {
+      font-family: 'D-DIN', 'Segoe UI', Tahoma, sans-serif;
+      font-size: 14px;
+      color: #333;
+      background: #fff;
+      padding-bottom: 30mm;
+    }
+
+    /* SETUP HALAMAN A4 */
+    @page {
+      size: A4;
+      margin: 0; /* Margin tipis saja, sisanya diurus tabel */
+    }
+
+    /* HEADER: Tetap pakai Table Header agar aman */
+    .layout-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    .header-img-container img { width: 100%; height: auto; display: block; }
+
+    /* FOOTER: Ganti jadi FIXED POSITION di bawah */
+    .footer-space {
+      height: 40mm; /* Sesuikan dengan tinggi asli gambar footer kamu */
+      display: block;
+    }
+
+    /* Footer Fixed: Ini gambar aslinya yang melayang */
+    .footer-fixed {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 25mm; /* Harus sama dengan footer-space */
+      z-index: 1000;
+    }
+    
+    /* Pastikan gambar mengisi penuh container */
+    .footer-fixed img {
+      width: 100%; height: 100%; object-fit: cover; display: block;
+    }
+
+    /* Spacer Header (Opsional) */
+    .header-space { height: 10px; }
+
+    /* Content Padding Wrapper */
+    .content-padding { padding: 0; }
+
+    /* --- STYLING KONTEN (Sama seperti sebelumnya) --- */
+    
+    /* Info Bar */
+    .info-bar {
+      display: flex; justify-content: space-around; align-items: center;
+      padding: 15px 20px; border-bottom: 1px solid #eee; background: #fff;
+      margin-bottom: 20px; border: 1px solid #eee; /* Tambah border luar dikit */
+    }
+    .info-item { display: flex; align-items: center; gap: 10px; flex: 1; justify-content: center; }
+    .info-icon {
+      width: 40px; height: 40px; border: 2px solid #E31E24; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center; color: #E31E24; flex-shrink: 0;
+    }
+    .info-icon svg { width: 20px; height: 20px; }
+    .info-text { font-size: 11px; color: #333; max-width: 140px; }
+    .info-text strong { color: #E31E24; }
+
+    /* Booking Details */
+    .section-header {
+      background: #E31E24; color: #fff; padding: 8px 20px;
+      font-size: 14px; font-weight: bold; margin-top: 20px;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .status-badge { background: #fff; color: #E31E24; padding: 2px 10px; font-size: 12px; border-radius: 2px; }
+
+    .booking-section { padding: 15px 20px; display: flex; justify-content: space-between; }
+    .booking-row { display: flex; margin-bottom: 6px; }
+    .booking-label { width: 180px; color: #666; }
+    .booking-value { font-weight: 600; color: #333; }
+    .qr-code { width: 80px; height: 80px; }
+    .qr-code img { width: 100%; height: 100%; }
+
+    /* Flight Section (UPSIZED +2px) */
+    .flight-section { padding: 15px 20px; }
+    .flight-segment { display: flex; margin-bottom: 10px; }
+    .airline-info { width: 120px; padding-right: 15px; }
+    .airline-logo img { max-width: 80px; height: auto; margin-bottom: 5px; }
+    .flight-number { font-size: 15px; font-weight: 600; }
+    .flight-class { font-size: 14px; color: #666; }
+    .flight-timeline { flex: 1; display: flex; flex-direction: column; }
+    .flight-point { display: flex; align-items: flex-start; gap: 15px; position: relative; }
+    .flight-time-block { width: 100px; text-align: right; }
+    .flight-date { font-size: 14px; color: #666; }
+    .flight-time { font-size: 20px; font-weight: bold; color: #333; }
+    .timeline-indicator { display: flex; flex-direction: column; align-items: center; width: 30px; position: relative; }
+    .plane-icon { width: 24px; height: 24px; color: #E31E24; z-index: 2; background: #fff; }
+    .plane-icon svg { width: 100%; height: 100%; fill: #E31E24; }
+    .plane-icon.departure svg { transform: rotate(-45deg); }
+    .plane-icon.arrival svg { transform: rotate(135deg); }
+    .timeline-line { position: absolute; top: 24px; left: 50%; transform: translateX(-50%); width: 0; height: 90px; border-left: 2px dashed #E31E24; z-index: 1; }
+    .flight-location { flex: 1; display: flex; flex-direction: column; justify-content: center;}
+    .city-full { font-size: 18px; font-weight: bold; color: #333; }
+    .airport-name { font-size: 14px; color: #666; margin-top: 2px;}
+    .duration-block { margin-left: 145px; padding: 10px 0; font-weight: bold; font-size: 14px; color: #888; }
+    .transit-block { display: flex; justify-content: center; align-items: center; gap: 10px; padding: 8px; background: #f9f9f9; border: 1px dashed #ddd; margin: 5px 0 20px 0; border-radius: 4px; font-size: 14px; }
+    .transit-label { font-weight: 600; color: #E31E24; }
+
+    /* Passenger Table */
+    .passenger-section { padding: 0 0 20px; }
+    .passenger-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    .passenger-table th { text-align: left; padding: 8px 10px; background: #f5f5f5; border-bottom: 1px solid #ddd; }
+    .passenger-table td { padding: 10px; border-bottom: 1px solid #eee; }
+    .passenger-table .no-col { width: 40px; text-align: center; }
+
+    /* Print Styles */
+    @media print {
+      thead { display: table-header-group; }
+      /* Footer tidak perlu tfoot lagi */
+      body { -webkit-print-color-adjust: exact; margin: 0; }
+    }
+  </style>
+</head>
+<body>
+
+  <table class="layout-table">
+    
+    <thead>
+      <tr>
+        <td>
+          <div class="header-img-container">
+             <img src="data:image/png;base64,{{.HeaderImage}}" alt="Header">
+          </div>
+          <div class="header-space">&nbsp;</div>
+        </td>
+      </tr>
+    </thead>
+
+    <tfoot>
+      <tr>
+        <td>
+          <div class="footer-space">&nbsp;</div>
+        </td>
+      </tr>
+    </tfoot>
+
+    <tbody>
+      <tr>
+        <td>
+          <div class="content-padding">
+            
+            <div class="info-bar">
+               <div class="info-item"><div class="info-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 12l2 2 4-4"/></svg></div><div class="info-text">Tunjukkan <strong>e-tiket & identitas</strong> saat check-in</div></div>
+               <div class="info-item"><div class="info-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v10l4 2"/><circle cx="12" cy="12" r="10"/></svg></div><div class="info-text">Check-in maks <strong>90 menit</strong> sebelum terbang</div></div>
+               <div class="info-item"><div class="info-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></div><div class="info-text">Waktu yang tertera adalah <strong>Waktu Lokal</strong></div></div>
+            </div>
+
+            <div class="section-header"><span>Detail Pemesanan</span><span class="status-badge">TICKETED</span></div>
+            <div class="booking-section">
+              <div class="booking-details">
+                <div class="booking-row"><span class="booking-label">ID Pemesanan</span><span class="booking-value">: {{.BookingID}}</span></div>
+                <div class="booking-row"><span class="booking-label">Kode Booking (PNR)</span><span class="booking-value">: {{.BookingCode}}</span></div>
+                <div class="booking-row"><span class="booking-label">Tanggal Booking</span><span class="booking-value">: {{.BookingDate}}</span></div>
+                <div class="booking-row"><span class="booking-label">Nama Pemesan</span><span class="booking-value">: {{.BookerName}}</span></div>
+              </div>
+              <div class="qr-code"><img src="data:image/png;base64,{{.QRCode}}" alt="QR"></div>
+            </div>
+
+            <div class="section-header">Detail Penerbangan</div>
+            <div class="flight-section">
+              {{range .Segments}}
+              <div class="flight-segment">
+                <div class="airline-info">
+                  <div class="airline-logo"><img src="{{.AirlineLogo}}" alt="Logo"></div>
+                  <div class="flight-number">{{.AirlineName}} {{.FlightNumber}}</div>
+                  <div class="flight-class">{{.FlightClass}}</div>
+                </div>
+                <div class="flight-timeline">
+                  <div class="flight-point">
+                    <div class="flight-time-block">
+                      <div class="flight-date">{{.Departure.Date}}</div>
+                      <div class="flight-time">{{.Departure.Time}}</div>
+                    </div>
+                    <div class="timeline-indicator">
+                      <div class="plane-icon departure"><svg viewBox="0 0 24 24"><path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg></div>
+                      <div class="timeline-line"></div>
+                    </div>
+                    <div class="flight-location">
+                      <div class="city-full">{{.Departure.CityName}} ({{.Departure.CityCode}})</div>
+                      <div class="airport-name">{{.Departure.AirportName}}</div>
+                    </div>
+                  </div>
+                  <div class="duration-block">{{.Duration}}</div>
+                  <div class="flight-point">
+                    <div class="flight-time-block">
+                      <div class="flight-date">{{.Arrival.Date}}</div>
+                      <div class="flight-time">{{.Arrival.Time}}</div>
+                    </div>
+                    <div class="timeline-indicator">
+                      <div class="plane-icon arrival"><svg viewBox="0 0 24 24"><path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg></div>
+                    </div>
+                    <div class="flight-location">
+                      <div class="city-full">{{.Arrival.CityName}} ({{.Arrival.CityCode}})</div>
+                      <div class="airport-name">{{.Arrival.AirportName}}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              {{if .Transit.IsTransit}}<div class="transit-block"><span class="transit-label">Transit di {{.Transit.Location}}</span> - {{.Transit.Duration}}</div>{{end}}
+              {{end}}
+            </div>
+
+            <div class="section-header">Detail Penumpang</div>
+            <div class="passenger-section">
+              <table class="passenger-table">
+                <thead>
+                  <tr><th class="no-col">No</th><th>Nama Penumpang</th><th>Nomor Tiket</th></tr>
+                </thead>
+                <tbody>
+                  {{range .Passengers}}
+                  <tr><td class="no-col">{{.Number}}</td><td>{{.Name}}</td><td>{{.TicketNumber}}</td></tr>
+                  {{end}}
+                </tbody>
+              </table>
+            </div>
+
+          </div> </td>
+      </tr>
+    </tbody>
+
+  </table>
+
+  <div class="footer-fixed">
+      <img src="data:image/png;base64,{{.FooterImage}}" alt="Footer">
+  </div>
+
+</body>
+</html>

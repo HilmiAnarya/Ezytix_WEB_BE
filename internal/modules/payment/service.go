@@ -66,35 +66,59 @@ func (s *paymentService) InitiatePayment(req InitiatePaymentRequest) (*InitiateP
 	if booking.Status == models.BookingStatusPaid {
 		return nil, errors.New("booking already paid")
 	}
-	// Cek Expiry (Asumsi booking expiredAt valid)
-	if booking.ExpiredAt != nil && time.Now().After(*booking.ExpiredAt) {
+
+	// [LOGIC BARU] Cek Expired berdasarkan Waktu Booking (Source of Truth)
+	if booking.ExpiredAt == nil {
+		return nil, errors.New("booking expiry data is invalid") // Safety check
+	}
+
+	// 1. Cek apakah Booking SUDAH Expired sebelum masuk payment gateway
+	if time.Now().After(*booking.ExpiredAt) {
 		return nil, errors.New("booking expired")
 	}
 
-	// B. Idempotency Check (Cek database lokal dulu)
-	// Jika user klik bayar 2x dengan metode yang sama, jangan tembak Midtrans lagi.
+	// B. Idempotency Check
 	existing, _ := s.repo.FindPaymentByOrderID(req.OrderID)
 	if existing != nil && existing.TransactionStatus == "pending" {
-		// Jika metode sama (Misal: User pilih BCA lagi), kembalikan data lama
-		// Note: Logic ini bisa diperkaya, misal cek expired time payment-nya juga
 		if existing.PaymentType == req.PaymentType {
 			return s.constructResponseFromModel(existing), nil
 		}
 	}
 
-	// C. Siapkan Parameter Midtrans (Core API)
-	// Hitung Gross Amount (int64 required by Midtrans)
+	// ====================================================
+	// C. DYNAMIC EXPIRY LOGIC (Booking Oriented)
+	// ====================================================
+
+	// 1. Hitung Sisa Waktu (Remaining Duration)
+	// Rumus: Waktu Expire Booking - Waktu Sekarang
+	remainingDuration := booking.ExpiredAt.Sub(time.Now())
+	
+	// Konversi ke Menit (Pembulatan ke bawah otomatis oleh int64)
+	minutesLeft := int(remainingDuration.Minutes())
+
+	// 2. Safety Guard
+	// Jika sisa waktu kurang dari 1 menit (misal user klik di detik-detik terakhir),
+	// Sebaiknya tolak payment untuk mencegah Race Condition (User bayar tapi sistem keburu expire)
+	if minutesLeft < 1 {
+		return nil, errors.New("booking time is almost up, please re-book")
+	}
+
+	// 3. Siapkan Time Format untuk Midtrans (Required Timezone)
+	now := time.Now()
+	midtransTimeFormat := now.Format("2006-01-02 15:04:05 -0700")
+
+	// D. Siapkan Parameter Midtrans
 	grossAmt := int64(booking.TotalPrice.InexactFloat64())
 	
 	chargeReq := &coreapi.ChargeReq{
-		PaymentType: coreapi.CoreapiPaymentType(req.PaymentType), // bank_transfer, echannel, qris, gopay
+		PaymentType: coreapi.CoreapiPaymentType(req.PaymentType),
 		TransactionDetails: midtrans.TransactionDetails{
 			OrderID:  req.OrderID,
 			GrossAmt: grossAmt,
 		},
 		CustomExpiry: &coreapi.CustomExpiry{
-			OrderTime:      time.Now().Format("2006-01-02 15:04:05"),
-			ExpiryDuration: 60, // Set expired 60 menit (sesuaikan kebutuhan)
+			OrderTime:      midtransTimeFormat, // Start Time = Sekarang
+			ExpiryDuration: minutesLeft,        // Durasi = Sisa waktu booking
 			Unit:           "minute",
 		},
 		Metadata: map[string]interface{}{
@@ -102,50 +126,47 @@ func (s *paymentService) InitiatePayment(req InitiatePaymentRequest) (*InitiateP
 		},
 	}
 
-	// D. Switch Case: Konfigurasi Spesifik per Metode
+	// E. Konfigurasi Spesifik per Metode (Switch Case)
 	switch req.PaymentType {
 	case "bank_transfer":
-		// BCA, BNI, BRI
 		chargeReq.BankTransfer = &coreapi.BankTransferDetails{
-			Bank: midtrans.Bank(req.Bank), // bca, bni, bri
+			Bank: midtrans.Bank(req.Bank),
 		}
 	case "echannel":
-		// Mandiri Bill Payment
 		chargeReq.EChannel = &coreapi.EChannelDetail{
 			BillInfo1: "Payment For:",
 			BillInfo2: "Flight Ticket",
 		}
 	case "qris":
-		// QRIS
 		chargeReq.Qris = &coreapi.QrisDetails{
-			Acquirer: "gopay", // Default acquirer
+			Acquirer: "gopay",
 		}
 	case "gopay":
-		// GoPay (DeepLink)
 		chargeReq.Gopay = &coreapi.GopayDetails{
 			EnableCallback: true,
-			CallbackUrl:    config.AppConfig.FrontendURL + "/payment-finish", // Redirect setelah bayar di app Gojek
+			CallbackUrl:    config.AppConfig.FrontendURL + "/payment-finish",
 		}
 	default:
 		return nil, errors.New("unsupported payment type")
 	}
 
-	// E. Eksekusi Charge ke Midtrans
-	resp, err := s.midtransClient.ChargeTransaction(chargeReq)
-	if err != nil {
-		// Handle error dari Midtrans (misal: Server Key salah, validasi gagal)
-		return nil, fmt.Errorf("midtrans error: %v", err)
+	// F. Eksekusi Charge ke Midtrans
+	resp, midtransErr := s.midtransClient.ChargeTransaction(chargeReq)
+	if midtransErr != nil {
+		return nil, fmt.Errorf("midtrans error: %v", midtransErr)
 	}
 
-	// F. Mapping Response & Save DB
-	return s.saveAndRespond(booking, req, resp)
+	// G. Mapping Response & Save DB
+	// PENTING: Kita kirim booking.ExpiredAt (Source of Truth) ke fungsi save
+	// Agar tabel 'payments' menyimpan waktu expiry yang SAMA PERSIS dengan tabel 'bookings'
+	return s.saveAndRespond(booking, req, resp, booking.ExpiredAt)
 }
 
 // ==========================================
 // 3. HELPERS: RESPONSE PARSING & SAVING
 // ==========================================
 
-func (s *paymentService) saveAndRespond(booking *models.Booking, req InitiatePaymentRequest, resp *coreapi.ChargeResponse) (*InitiatePaymentResponse, error) {
+func (s *paymentService) saveAndRespond(booking *models.Booking, req InitiatePaymentRequest, resp *coreapi.ChargeResponse, strictExpiry *time.Time) (*InitiatePaymentResponse, error) {
 	
 	// Variables untuk menampung hasil ekstraksi
 	var vaNumber, bank, billKey, billerCode, qrUrl, deeplink string
@@ -174,11 +195,6 @@ func (s *paymentService) saveAndRespond(booking *models.Booking, req InitiatePay
 			}
 		}
 	}
-
-	// 2. Simpan ke Database
-	// Parse Transaction Time / Expiry Time dari Midtrans string
-	// Format Midtrans: "2006-01-02 15:04:05"
-	expiryTime, _ := time.Parse("2006-01-02 15:04:05", resp.ExpiryTime)
 	
 	paymentModel := &models.Payment{
 		OrderID:           req.OrderID,
@@ -194,7 +210,7 @@ func (s *paymentService) saveAndRespond(booking *models.Booking, req InitiatePay
 		QrUrl:      qrUrl,
 		Deeplink:   deeplink,
 		
-		ExpiryTime: &expiryTime,
+		ExpiryTime: strictExpiry,
 	}
 
 	if err := s.repo.CreatePayment(paymentModel); err != nil {

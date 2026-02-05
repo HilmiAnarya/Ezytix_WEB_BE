@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bukti Pembelian - Ezytix</title>
+    <style>
+        /* Reset and Base Styles */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        @page { size: A4; margin: 0; }
+        
+        body {
+            font-family: 'D-DIN', 'Segoe UI', Tahoma, sans-serif; /* Prioritaskan Font D-DIN */
+            background-color: #f5f5f5;
+            color: #333333;
+            line-height: 1.5;
+            font-size: 14px;
+            padding: 0; /* Hapus padding body agar gambar header full */
+        }
+
+        .invoice-container {
+            width: 210mm;
+            min-height: 297mm;
+            margin: 0 auto;
+            background: #ffffff;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            /* Box shadow dihapus untuk print agar bersih */
+        }
+
+        /* --- HYBRID HEADER & FOOTER --- */
+        .header-img-container {
+            width: 100%;
+            line-height: 0; /* Menghilangkan gap di bawah gambar */
+        }
+        .header-img-container img {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        .footer-img-container {
+            width: 100%;
+            margin-top: auto; /* Push footer to bottom */
+            line-height: 0;
+        }
+        .footer-img-container img {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        /* --- CONTENT BODY --- */
+        .content {
+            padding: 24px 32px;
+            flex: 1;
+        }
+
+        /* Receipt Info */
+        .receipt-info { margin-bottom: 24px; text-align: right; }
+        .receipt-info h2 { font-size: 18px; font-weight: 700; color: #333; margin-bottom: 8px; }
+        .receipt-info p { color: #555; font-size: 14px; margin-bottom: 4px; }
+
+        /* Section Header (Merah Ezytix) */
+        .section-header {
+            background: #e60012;
+            color: #ffffff;
+            padding: 8px 16px;
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            border-radius: 4px; /* Sedikit rounded biar modern */
+        }
+
+        /* Two Column Layout */
+        .two-columns { display: flex; gap: 32px; margin-bottom: 24px; }
+        .column { flex: 1; }
+        .detail-row { margin-bottom: 8px; font-size: 14px; display: flex; }
+        .detail-row .label { color: #666; width: 140px; flex-shrink: 0; }
+        .detail-row .value { color: #333; font-weight: 500; }
+
+        /* Passenger Section */
+        .passenger-section { margin-bottom: 24px; }
+        .passenger-list { padding: 8px 0; }
+        .passenger-item { display: inline-block; margin-right: 24px; margin-bottom: 8px; }
+        .passenger-name { font-weight: 700; color: #333; }
+        .passenger-type { color: #666; font-weight: 400; font-size: 12px; }
+
+        /* Purchase Details Table */
+        .purchase-section { margin-bottom: 24px; }
+        .purchase-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+        
+        .purchase-table th {
+            background: #f8f8f8;
+            border-bottom: 2px solid #e60012; /* Aksen merah di bawah header tabel */
+            padding: 12px 16px;
+            text-align: left;
+            font-weight: 700;
+            color: #333;
+            font-size: 14px;
+        }
+        .purchase-table th:nth-child(1) { text-align: center; width: 40px; } /* No */
+        .purchase-table th:nth-child(4) { text-align: center; width: 80px; } /* Qty */
+        .purchase-table th:nth-child(5) { text-align: right; width: 130px; } /* Total */
+
+        .purchase-table td {
+            border-bottom: 1px solid #eee;
+            padding: 12px 16px;
+            vertical-align: top;
+            font-size: 14px;
+        }
+        .purchase-table td:nth-child(1) { text-align: center; color: #888; }
+        .purchase-table td:nth-child(4) { text-align: center; }
+        .purchase-table td:nth-child(5) { text-align: right; font-weight: 500; }
+
+        /* Zebra Striping (Optional, biar gampang baca) */
+        .purchase-table tr:nth-child(even) { background-color: #fafafa; }
+
+        /* Summary Section */
+        .summary-wrapper {
+            margin-top: 16px;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+        }
+        .summary-row {
+            display: flex;
+            justify-content: flex-end;
+            padding: 6px 16px;
+            width: 100%;
+            max-width: 400px; /* Batasi lebar area total */
+        }
+        .summary-row .label { text-align: right; width: 150px; padding-right: 24px; color: #666; }
+        .summary-row .value { width: 130px; text-align: right; color: #333; }
+
+        .total-row {
+            display: flex;
+            justify-content: flex-end;
+            padding: 12px 16px;
+            margin-top: 8px;
+            background: #ffe6e6; /* Merah sangat muda untuk highlight total */
+            width: 100%;
+            max-width: 400px;
+            border-radius: 4px;
+        }
+        .total-row .label { font-weight: 700; color: #e60012; padding-right: 24px; width: 150px; text-align: right;}
+        .total-row .value { width: 130px; text-align: right; font-weight: 700; color: #e60012; font-size: 18px; }
+
+        /* Print Styles */
+        @media print {
+            body { -webkit-print-color-adjust: exact; print-color-adjust: exact; background: #ffffff; }
+            .invoice-container { width: 100%; min-height: 100vh; box-shadow: none; }
+        }
+    </style>
+</head>
+<body>
+    <div class="invoice-container">
+        
+        <div class="header-img-container">
+            <img src="data:image/png;base64,{{.HeaderImage}}" alt="Header Invoice">
+        </div>
+
+        <div class="content">
+            <div class="receipt-info">
+                <p><strong>Nomor:</strong> {{.InvoiceNumber}}</p>
+                <p><strong>Tanggal:</strong> {{.Date}}</p>
+            </div>
+
+            <div class="two-columns">
+                <div class="column">
+                    <div class="section-header">Detail Pemesanan</div>
+                    <div class="detail-row">
+                        <span class="label">Nama Pemesan:</span>
+                        <span class="value">{{.CustomerName}}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="label">Email:</span>
+                        <span class="value">{{.CustomerEmail}}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="label">Nomor Telepon:</span>
+                        <span class="value">{{.CustomerPhone}}</span>
+                    </div>
+                </div>
+                <div class="column">
+                    <div class="section-header">Detail Pembayaran</div>
+                    <div class="detail-row">
+                        <span class="label">Metode Pembayaran:</span>
+                        <span class="value">{{.PaymentMethod}}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="label">Detail Transaksi:</span>
+                        <span class="value">{{.PaymentStatus}}</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="passenger-section">
+                <div class="section-header">Data Penumpang</div>
+                <div class="passenger-list">
+                    {{range .Passengers}}
+                    <span class="passenger-item">
+                        <span class="passenger-name">{{.Name}}</span>
+                        <span class="passenger-type">{{.Type}}</span>
+                    </span>
+                    {{end}}
+                </div>
+            </div>
+
+            <div class="purchase-section">
+                <div class="section-header">Detail Pembelian</div>
+                <table class="purchase-table">
+                    <thead>
+                        <tr>
+                            <th>No</th>
+                            <th>Produk</th>
+                            <th>Deskripsi</th>
+                            <th>Jumlah</th>
+                            <th>Total Rp</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{range .Items}}
+                        <tr>
+                            <td>{{.Number}}</td>
+                            <td>{{.Product}}</td>
+                            <td>{{.Description}}</td>
+                            <td>{{.Quantity}}</td>
+                            <td>{{.Total}}</td>
+                        </tr>
+                        {{end}}
+                    </tbody>
+                </table>
+                
+                <div class="summary-wrapper">
+                    <div class="summary-row">
+                        <span class="label">Subtotal</span>
+                        <span class="value">{{.SubTotal}}</span>
+                    </div>
+                    <div class="summary-row">
+                        <span class="label">Biaya Layanan</span>
+                        <span class="value">{{.ServiceFee}}</span>
+                    </div>
+                    <div class="total-row">
+                        <span class="label">Total Pembayaran</span>
+                        <span class="value">{{.GrandTotal}}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer-img-container">
+            <img src="data:image/png;base64,{{.FooterImage}}" alt="Footer Invoice">
+        </div>
+    </div>
+</body>
+</html>
