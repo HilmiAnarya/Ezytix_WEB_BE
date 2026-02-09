@@ -31,6 +31,9 @@ type BookingRepository interface {
 	CancelBookingAtomic(booking *models.Booking) error
 	GetByUserID(userID uint) ([]models.Booking, error)
 	UpdatePastBookingsToExpired() error
+	GetBookingForInvoice(bookingCode string) (*models.Booking, error)
+	GetPaymentByOrderID(orderID string) (*models.Payment, error)
+	GetBookingForTicket(bookingCode string) (*models.Booking, error)
 }
 
 type bookingRepository struct {
@@ -41,7 +44,6 @@ func NewBookingRepository(db *gorm.DB) BookingRepository {
 	return &bookingRepository{db}
 }
 
-// [FIXED IMPLEMENTATION] Get Booking for Payment with SUM Logic
 func (r *bookingRepository) GetBookingByOrderID(orderID string) (*models.Booking, error) {
 	var booking models.Booking
 
@@ -215,4 +217,60 @@ func (r *bookingRepository) UpdatePastBookingsToExpired() error {
 	`
 	err := r.db.Exec(query, models.BookingStatusExpired, models.BookingStatusPaid, time.Now()).Error
 	return err
+}
+
+func (r *bookingRepository) GetBookingForInvoice(bookingCode string) (*models.Booking, error) {
+    var booking models.Booking
+
+    // Eager Loading Gila-gilaan untuk kebutuhan PDF
+    err := r.db.
+        Preload("User").                                       // Data Pemesan
+        Preload("Details").                             // Data Penumpang & Harga per item
+        Preload("Flight").                                     // Data Penerbangan Utama
+        //Preload("Flight.FlightClass").                         // Kelas (Economy, etc)
+        Preload("Flight.FlightLegs").                          // Segmen Penerbangan
+        Preload("Flight.FlightLegs.Airline").                  // Nama Maskapai
+        Preload("Flight.FlightLegs.OriginAirport").            // Bandara Asal
+        Preload("Flight.FlightLegs.DestinationAirport").       // Bandara Tujuan
+        Where("booking_code = ?", bookingCode).
+        First(&booking).Error
+
+    if err != nil {
+        return nil, err
+    }
+    return &booking, nil
+}
+
+func (r *bookingRepository) GetPaymentByOrderID(orderID string) (*models.Payment, error) {
+	var payment models.Payment
+	// Cari berdasarkan kolom order_id
+	err := r.db.Where("order_id = ?", orderID).First(&payment).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil // Return nil jika belum ada payment (aman)
+		}
+		return nil, err
+	}
+	return &payment, nil
+}
+
+func (r *bookingRepository) GetBookingForTicket(bookingCode string) (*models.Booking, error) {
+	var booking models.Booking
+
+	// Kita butuh data Flight, Legs, Airline, Airport, User, dan Details
+	err := r.db.
+		Preload("User").
+		Preload("Details").
+		Preload("Flight").
+		Preload("Flight.FlightLegs").
+		Preload("Flight.FlightLegs.Airline").
+		Preload("Flight.FlightLegs.OriginAirport").
+		Preload("Flight.FlightLegs.DestinationAirport").
+		Where("booking_code = ?", bookingCode).
+		First(&booking).Error
+
+	if err != nil {
+		return nil, err
+	}
+	return &booking, nil
 }

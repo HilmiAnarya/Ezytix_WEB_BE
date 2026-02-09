@@ -2,6 +2,7 @@ package booking
 
 import (
 	"ezytix-be/pkg/jwt"
+	"fmt"
 
 	"github.com/gofiber/fiber/v2"
 )
@@ -87,4 +88,59 @@ func (h *BookingHandler) GetMyBookings(c *fiber.Ctx) error {
 		"message": "successfully fetched booking history",
 		"data":    bookings,
 	})
+}
+
+// ==========================================
+// 3. DOWNLOAD INVOICE HANDLER (NEW)
+// ==========================================
+func (h *BookingHandler) DownloadInvoice(c *fiber.Ctx) error {
+	bookingCode := c.Params("booking_code")
+	if bookingCode == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"status":  "error",
+			"message": "Booking code is required",
+		})
+	}
+
+	// Panggil Service untuk Generate PDF
+	pdfBytes, err := h.service.DownloadInvoice(c.Context(), bookingCode)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"status":  "error",
+			"message": "Failed to generate invoice",
+			"error":   err.Error(),
+		})
+	}
+
+	// Set Header Response agar browser mendownload file PDF
+	c.Set("Content-Type", "application/pdf")
+	c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=Invoice-%s.pdf", bookingCode))
+
+	// Kirim Binary PDF ke User
+	return c.Send(pdfBytes)
+}
+
+// Tambahkan Method ini
+func (h *BookingHandler) DownloadEticket(c *fiber.Ctx) error {
+	bookingCode := c.Params("booking_code")
+	if bookingCode == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"status":  "error",
+			"message": "Booking code is required",
+		})
+	}
+
+	pdfBytes, err := h.service.DownloadEticket(c.Context(), bookingCode)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"status":  "error",
+			"message": "Failed to generate e-ticket",
+			"error":   err.Error(),
+		})
+	}
+
+	c.Set("Content-Type", "application/pdf")
+	c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=Eticket-%s.pdf", bookingCode))
+
+	return c.Send(pdfBytes)
 }

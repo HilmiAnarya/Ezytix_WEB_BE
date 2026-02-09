@@ -102,7 +102,7 @@
     .plane-icon svg { width: 100%; height: 100%; fill: #E31E24; }
     .plane-icon.departure svg { transform: rotate(-45deg); }
     .plane-icon.arrival svg { transform: rotate(135deg); }
-    .timeline-line { position: absolute; top: 24px; left: 50%; transform: translateX(-50%); width: 0; height: 90px; border-left: 2px dashed #E31E24; z-index: 1; }
+    .timeline-line { position: absolute; top: 24px; left: 50%; transform: translateX(-50%); width: 0; height: 50px; border-left: 2px dashed #E31E24; z-index: 1; }
     .flight-location { flex: 1; display: flex; flex-direction: column; justify-content: center;}
     .city-full { font-size: 18px; font-weight: bold; color: #333; }
     .airport-name { font-size: 14px; color: #666; margin-top: 2px;}
@@ -175,7 +175,7 @@
               {{range .Segments}}
               <div class="flight-segment">
                 <div class="airline-info">
-                  <div class="airline-logo"><img src="{{.AirlineLogo}}" alt="Logo"></div>
+                  <div class="airline-logo"><img src="data:image/png;base64,{{.AirlineLogo}}" alt="Logo"></div>
                   <div class="flight-number">{{.AirlineName}} {{.FlightNumber}}</div>
                   <div class="flight-class">{{.FlightClass}}</div>
                 </div>

@@ -2,6 +2,7 @@ package pdfprinter
 
 import (
 	"encoding/base64"
+	"github.com/skip2/go-qrcode"
 	"fmt"
 	"os"
 )
@@ -20,4 +21,18 @@ func ImageToBase64(filePath string) (string, error) {
 	encoded := base64.StdEncoding.EncodeToString(bytes)
 	
 	return encoded, nil
+}
+
+// [NEW] GenerateQRCodeBase64 membuat QR code dari text dan mengembalikannya sbg string Base64
+func GenerateQRCodeBase64(text string) (string, error) {
+	// Generate QR Code size 256x256
+	var png []byte
+	png, err := qrcode.Encode(text, qrcode.Medium, 256)
+	if err != nil {
+		return "", fmt.Errorf("failed to generate qr code: %w", err)
+	}
+
+	// Convert ke Base64
+	base64Str := base64.StdEncoding.EncodeToString(png)
+	return base64Str, nil
 }
