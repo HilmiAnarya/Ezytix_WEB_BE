@@ -49,7 +49,7 @@ func BookingRegisterRoutes(app *fiber.App, db *gorm.DB) {
 	
 	bookings.Post("/", bookingHandler.CreateOrder)
 	bookings.Get("/history", bookingHandler.GetMyBookings)
-	bookings.Get("/:booking_code/invoice", bookingHandler.DownloadInvoice)
+	bookings.Get("/:order_id/invoice", bookingHandler.DownloadInvoice)
 	bookings.Get("/:booking_code/eticket", bookingHandler.DownloadEticket)
 
 	// ❌ ROUTE PAYMENT & WEBHOOK DIHAPUS DARI SINI

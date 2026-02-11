@@ -7,9 +7,9 @@ import (
 )
 
 const (
-	PassengerTypeAdult  = "adult"
-	PassengerTypeChild  = "child"
-	PassengerTypeInfant = "infant"
+	PassengerTypeAdult  = "Dewasa"
+	PassengerTypeChild  = "Anak-anak"
+	PassengerTypeInfant = "Bayi"
 )
 
 type BookingDetail struct {

@@ -34,6 +34,7 @@ type BookingRepository interface {
 	GetBookingForInvoice(bookingCode string) (*models.Booking, error)
 	GetPaymentByOrderID(orderID string) (*models.Payment, error)
 	GetBookingForTicket(bookingCode string) (*models.Booking, error)
+	GetBookingsForInvoiceByOrderID(orderID string) ([]models.Booking, error)
 }
 
 type bookingRepository struct {
@@ -273,4 +274,25 @@ func (r *bookingRepository) GetBookingForTicket(bookingCode string) (*models.Boo
 		return nil, err
 	}
 	return &booking, nil
+}
+
+func (r *bookingRepository) GetBookingsForInvoiceByOrderID(orderID string) ([]models.Booking, error) {
+    var bookings []models.Booking
+
+    // Gunakan Find (bukan First) karena hasilnya bisa lebih dari 1 (misal: Round Trip)
+    err := r.db.
+        Preload("User").
+        Preload("Details").
+        Preload("Flight").
+        Preload("Flight.FlightLegs").
+        Preload("Flight.FlightLegs.Airline").
+        Preload("Flight.FlightLegs.OriginAirport").
+        Preload("Flight.FlightLegs.DestinationAirport").
+        Where("order_id = ?", orderID).
+        Find(&bookings).Error
+
+    if err != nil {
+        return nil, err
+    }
+    return bookings, nil
 }

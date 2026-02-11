@@ -272,129 +272,114 @@ func (s *bookingService) GetUserBookings(userID uint) ([]MyBookingResponse, erro
 	return responses, nil
 }
 
-func (s *bookingService) DownloadInvoice(ctx context.Context, bookingCode string) ([]byte, error) {
-	// 1. Ambil Data Lengkap dari Repo
-	// Pastikan kamu sudah menambahkan method GetBookingForInvoice di repository.go!
-	booking, err := s.repo.GetBookingForInvoice(bookingCode)
+func (s *bookingService) DownloadInvoice(ctx context.Context, orderID string) ([]byte, error) {
+	// 1. AMBIL SEMUA BOOKING DLM SATU ORDER (Return Slice/Array)
+	bookings, err := s.repo.GetBookingsForInvoiceByOrderID(orderID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("bookings not found: %w", err)
 	}
-	// 2. AMBIL DATA PAYMENT (TERPISAH)
-	payment, err := s.repo.GetPaymentByOrderID(booking.OrderID)
+	if len(bookings) == 0 {
+		return nil, fmt.Errorf("no bookings found for order id: %s", orderID)
+	}
+
+	// Ambil Booking Pertama sebagai referensi Data User (Customer)
+	mainBooking := bookings[0]
+
+	// 2. AMBIL DATA PAYMENT
+	payment, err := s.repo.GetPaymentByOrderID(orderID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch payment: %w", err)
 	}
 
-	// 2. Setup Path Assets
-	cwd, err := os.Getwd()
-	if err != nil {
-		return nil, fmt.Errorf("gagal get working directory: %v", err)
-	}
-	// Path: internal/assets/images/
+	// Setup Path Assets
+	cwd, _ := os.Getwd()
 	assetsPath := filepath.Join(cwd, "internal", "assets", "images")
-	
 	getHeader := func(name string) string {
 		fullPath := filepath.Join(assetsPath, name)
 		b64, err := pdfprinter.ImageToBase64(fullPath)
 		if err != nil {
-			fmt.Printf("⚠️ Warning: Gagal load asset %s: %v\n", name, err)
 			return ""
 		}
 		return b64
 	}
 
-	// 3. LOGIC GROUPING ITEM BELANJA (INVOICE ITEMS)
-	// Kita map berdasarkan PassengerType ("DEWASA", "ANAK", "BAYI")
-	type groupItem struct {
-		Count int64
-		Total decimal.Decimal
-		Price decimal.Decimal
-	}
-	groupedItems := make(map[string]*groupItem)
+	// 3. LOGIC ITEM BELANJA (INVOICE ITEMS) - MULTI BOOKING
+	var invoiceItems []pdfprinter.InvoiceItem
+	var totalAmountDecimal decimal.Decimal
+	counter := 1
 
-	// Loop semua penumpang di booking_details
-	for _, detail := range booking.Details {
-		pType := strings.ToUpper(detail.PassengerType) // Normalisasi ke Uppercase
-		
-		if _, exists := groupedItems[pType]; !exists {
-			// Inisialisasi
-			groupedItems[pType] = &groupItem{
-				Count: 0, 
-				Total: decimal.Zero, 
-				Price: detail.Price, // Asumsi harga per tipe sama dalam satu booking
+	// Loop setiap booking (Misal: Loop 1 = Pergi, Loop 2 = Pulang)
+	for _, booking := range bookings {
+		totalAmountDecimal = totalAmountDecimal.Add(booking.TotalPrice)
+
+		// Grouping Item per Booking (Dewasa/Anak)
+		type groupItem struct {
+			Count int64
+			Total decimal.Decimal
+			Price decimal.Decimal
+		}
+		groupedItems := make(map[string]*groupItem)
+
+		for _, detail := range booking.Details {
+			pType := strings.ToUpper(detail.PassengerType)
+			if _, exists := groupedItems[pType]; !exists {
+				groupedItems[pType] = &groupItem{Count: 0, Total: decimal.Zero, Price: detail.Price}
+			}
+			groupedItems[pType].Count++
+			groupedItems[pType].Total = groupedItems[pType].Total.Add(detail.Price)
+		}
+
+		// Siapkan Deskripsi Penerbangan
+		flightDesc := "Penerbangan"
+		flightDateStr := "-"
+		if booking.Flight.ID != 0 {
+			flightDateStr = booking.Flight.DepartureTime.Format("02 Jan 2006")
+			if len(booking.Flight.FlightLegs) > 0 {
+				leg := booking.Flight.FlightLegs[0]
+				flightDesc = fmt.Sprintf("%s %s-%s", 
+					leg.Airline.Name, 
+					leg.OriginAirport.Code, 
+					leg.DestinationAirport.Code,
+				)
 			}
 		}
-		
-		groupedItems[pType].Count++
-		groupedItems[pType].Total = groupedItems[pType].Total.Add(detail.Price)
-	}
 
-	// Convert Map ke Struct InvoiceItem PDF
-	var invoiceItems []pdfprinter.InvoiceItem
-	counter := 1
-	
-	// Ambil Info Flight Umum (Dari Leg Pertama)
-	flightDesc := "Penerbangan"
-	// Cek apakah data flight terload (Eager Loading)
-	if booking.Flight.ID != 0 && len(booking.Flight.FlightLegs) > 0 {
-		leg := booking.Flight.FlightLegs[0]
-		// Contoh: "Lion Air CGK-DPS"
-		flightDesc = fmt.Sprintf("%s %s-%s", 
-			leg.Airline.Name, 
-			leg.OriginAirport.Code, 
-			leg.DestinationAirport.Code,
-		)
-	} else {
-		flightDesc = "Tiket Penerbangan"
-	}
-	
-	// Tanggal Terbang (Format: 5 Nov 2025)
-	var flightDateStr string
-	if booking.Flight.ID != 0 {
-		flightDateStr = booking.Flight.DepartureTime.Format("02 Jan 2006")
-	} else {
-		flightDateStr = "-"
-	}
+		// Masukkan ke List Item Invoice
+		for pType, data := range groupedItems {
+			fullDesc := fmt.Sprintf("%s (%s) - %s", flightDesc, pType, flightDateStr)
+			totalFloat, _ := data.Total.Float64()
 
-	// Loop Map Group tadi untuk jadi baris Invoice
-	for pType, data := range groupedItems {
-		// Description: "Lion Air CGK-DPS (DEWASA) 5 Nov 2025"
-		fullDesc := fmt.Sprintf("%s (%s) %s", flightDesc, pType, flightDateStr)
-
-		// Konversi Decimal ke Float64 untuk Formatter
-		totalFloat, _ := data.Total.Float64()
-
-		item := pdfprinter.InvoiceItem{
-			Number:      strconv.Itoa(counter),
-			Product:     "Tiket Pesawat",
-			Description: fullDesc,
-			Quantity:    int(data.Count),
-			Total:       utils.FormatRupiah(totalFloat), // Pakai helper baru
+			item := pdfprinter.InvoiceItem{
+				Number:      strconv.Itoa(counter),
+				Product:     "Tiket Pesawat",
+				Description: fullDesc,
+				Quantity:    int(data.Count),
+				Total:       utils.FormatRupiah(totalFloat),
+			}
+			invoiceItems = append(invoiceItems, item)
+			counter++
 		}
-		invoiceItems = append(invoiceItems, item)
-		counter++
 	}
 
-	// 4. Mapping Data Penumpang (Untuk List Penumpang di Invoice)
+	// 4. MAPPING PENUMPANG (Ambil dari Main Booking saja agar tidak duplikat)
+	// Asumsi: Penumpang berangkat dan pulang adalah orang yang sama.
 	var passengers []pdfprinter.Passenger
-	for _, detail := range booking.Details {
+	for _, detail := range mainBooking.Details {
 		passengers = append(passengers, pdfprinter.Passenger{
 			Name: detail.PassengerName,
 			Type: fmt.Sprintf("(%s)", strings.ToUpper(detail.PassengerType)),
 		})
 	}
 
-	// 5. Mapping Metadata Invoice & Payment
+	// 5. MAPPING METADATA & PAYMENT
 	paymentMethod := "Menunggu Pembayaran"
 	paymentStatus := "BELUM LUNAS"
 	paymentDate := "-"
 
-	// Cek Relasi Payment (Pointer check)
 	if payment != nil {
-		// FIX: Mapping Nama Metode Pembayaran dari Field Midtrans
+		// Logic Payment Method
 		switch payment.PaymentType {
 		case "bank_transfer":
-			// Jika bank transfer, ambil nama bank-nya (bca, bni, dll)
 			paymentMethod = fmt.Sprintf("%s Virtual Account", strings.ToUpper(payment.Bank))
 		case "echannel":
 			paymentMethod = "Mandiri Bill"
@@ -403,46 +388,42 @@ func (s *bookingService) DownloadInvoice(ctx context.Context, bookingCode string
 		case "credit_card":
 			paymentMethod = "Credit Card"
 		default:
-			// Fallback: rapikan string (ex: cstore -> Cstore)
 			paymentMethod = strings.Title(strings.ReplaceAll(payment.PaymentType, "_", " "))
 		}
 
-		// FIX: Mapping Status dari 'transaction_status'
-		// Midtrans pakai "settlement" untuk Lunas
+		// Logic Payment Status
 		switch payment.TransactionStatus {
-		case models.PaymentStatusSettlement: // "settlement"
+		case models.PaymentStatusSettlement:
 			paymentStatus = "LUNAS"
-		case models.PaymentStatusPending:    // "pending"
+		case models.PaymentStatusPending:
 			paymentStatus = "PENDING"
-		case models.PaymentStatusExpire:     // "expire"
+		case models.PaymentStatusExpire:
 			paymentStatus = "KADALUARSA"
-		case models.PaymentStatusCancel:     // "cancel"
+		case models.PaymentStatusCancel:
 			paymentStatus = "DIBATALKAN"
-		case models.PaymentStatusDeny:       // "deny"
+		case models.PaymentStatusDeny:
 			paymentStatus = "DITOLAK"
 		default:
-			// Fallback: Jika ada status lain, cukup di-uppercase
 			paymentStatus = strings.ToUpper(payment.TransactionStatus)
 		}
 		
-		// Tanggal Bayar (created_at payment)
 		paymentDate = payment.CreatedAt.Format("02 January 2006, 15:04")
 	}
 
-	// Helper Decimal to Float
-	totalAmountFloat, _ := booking.TotalPrice.Float64() // Note: Di modelmu namanya TotalPrice, bukan TotalAmount
+	// Final Calculation
+	finalTotalFloat, _ := totalAmountDecimal.Float64()
 
-	// 6. Susun Data Final
+	// 6. SUSUN DATA FINAL
 	invoiceData := pdfprinter.InvoiceData{
 		HeaderImage:   getHeader("invoice_header.png"),
 		FooterImage:   getHeader("invoice_footer.png"),
 		
-		InvoiceNumber: booking.BookingCode, // Menggunakan Kode Booking sbg No Invoice
-		Date:          paymentDate,         // Tanggal bayar
+		InvoiceNumber: mainBooking.OrderID, // Menggunakan Order ID sebagai No Invoice (Lebih Konsisten)
+		Date:          paymentDate,
 		
-		CustomerName:  booking.User.FullName,
-		CustomerEmail: booking.User.Email,
-		CustomerPhone: booking.User.Phone,
+		CustomerName:  mainBooking.User.FullName,
+		CustomerEmail: mainBooking.User.Email,
+		CustomerPhone: mainBooking.User.Phone,
 		
 		PaymentMethod: paymentMethod,
 		PaymentStatus: paymentStatus,
@@ -450,34 +431,25 @@ func (s *bookingService) DownloadInvoice(ctx context.Context, bookingCode string
 		Passengers:    passengers,
 		Items:         invoiceItems,
 		
-		SubTotal:      utils.FormatRupiah(totalAmountFloat),
-		ServiceFee:    "Rp 0", // HARDCODED 0 Sesuai Request
-		GrandTotal:    utils.FormatRupiah(totalAmountFloat),
+		SubTotal:      utils.FormatRupiah(finalTotalFloat),
+		ServiceFee:    "Rp 0",
+		GrandTotal:    utils.FormatRupiah(finalTotalFloat),
 	}
 
-	// 7. Panggil Printer Engine
-	// Generate file temp unik
-	tmpFileName := fmt.Sprintf("temp_invoice_%s_%d.pdf", bookingCode, time.Now().Unix())
+	// 7. Generate PDF
+	tmpFileName := fmt.Sprintf("invoice_%s_%d.pdf", orderID, time.Now().Unix())
 	tmpFilePath := filepath.Join(cwd, tmpFileName)
-	
-	// Generate PDF
-	// Pastikan const TemplateFolder di printer.go menunjuk ke folder yang benar relative terhadap cwd
-	// atau hardcode path template di sini jika perlu.
-	// Asumsi: "invoice.html" ada di internal/utils/pdf_printer/templates/
+
 	err = pdfprinter.GeneratePDF("invoice.html", invoiceData, tmpFilePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed generate pdf: %w", err)
 	}
-	
-	// Baca file PDF jadi bytes
+
 	pdfBytes, err := os.ReadFile(tmpFilePath)
 	if err != nil {
-		os.Remove(tmpFilePath) // Cleanup if read fails
+		os.Remove(tmpFilePath)
 		return nil, fmt.Errorf("failed read pdf file: %w", err)
 	}
-	
-	// Hapus file temp (Cleanup) agar server tidak penuh
-	// Gunakan goroutine atau defer sebenarnya lebih aman, tapi ini oke
 	os.Remove(tmpFilePath)
 
 	return pdfBytes, nil

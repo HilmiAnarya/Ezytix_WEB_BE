@@ -94,30 +94,30 @@ func (h *BookingHandler) GetMyBookings(c *fiber.Ctx) error {
 // 3. DOWNLOAD INVOICE HANDLER (NEW)
 // ==========================================
 func (h *BookingHandler) DownloadInvoice(c *fiber.Ctx) error {
-	bookingCode := c.Params("booking_code")
-	if bookingCode == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"status":  "error",
-			"message": "Booking code is required",
-		})
-	}
+    // UBAH DISINI: Ambil order_id
+    orderID := c.Params("order_id")
+    if orderID == "" {
+        return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+            "status":  "error",
+            "message": "Order ID is required",
+        })
+    }
 
-	// Panggil Service untuk Generate PDF
-	pdfBytes, err := h.service.DownloadInvoice(c.Context(), bookingCode)
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"status":  "error",
-			"message": "Failed to generate invoice",
-			"error":   err.Error(),
-		})
-	}
+    // Panggil Service dengan Order ID
+    pdfBytes, err := h.service.DownloadInvoice(c.Context(), orderID)
+    if err != nil {
+        return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+            "status":  "error",
+            "message": "Failed to generate invoice",
+            "error":   err.Error(),
+        })
+    }
 
-	// Set Header Response agar browser mendownload file PDF
-	c.Set("Content-Type", "application/pdf")
-	c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=Invoice-%s.pdf", bookingCode))
+    c.Set("Content-Type", "application/pdf")
+    // Nama file jadi Invoice-ORDERID.pdf
+    c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=Invoice-%s.pdf", orderID))
 
-	// Kirim Binary PDF ke User
-	return c.Send(pdfBytes)
+    return c.Send(pdfBytes)
 }
 
 // Tambahkan Method ini
