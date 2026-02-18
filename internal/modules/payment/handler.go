@@ -17,8 +17,6 @@ func NewPaymentHandler(service PaymentService) *PaymentHandler {
 // POST /api/v1/payments/initiate
 func (h *PaymentHandler) InitiatePayment(c *fiber.Ctx) error {
 	var req InitiatePaymentRequest
-	
-	// 1. Parse Body
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"status":  "error",
@@ -26,28 +24,15 @@ func (h *PaymentHandler) InitiatePayment(c *fiber.Ctx) error {
 		})
 	}
 
-	// 2. Call Service
 	resp, err := h.service.InitiatePayment(req)
 	if err != nil {
-		// Mapping HTTP Status Code manual
-		status := fiber.StatusBadRequest
-		
-		if strings.Contains(err.Error(), "booking not found") {
-			status = fiber.StatusNotFound
-		} else if strings.Contains(err.Error(), "already paid") {
-			status = fiber.StatusConflict
-		} else if strings.Contains(err.Error(), "expired") {
-			status = fiber.StatusGone
-		}
-
-		return c.Status(status).JSON(fiber.Map{
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"status":  "error",
 			"message": err.Error(),
 		})
 	}
 
-	// 3. Success Response (Manual Fiber Map)
-	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 		"status":  "success",
 		"message": "Payment initiated successfully",
 		"data":    resp,
@@ -57,22 +42,76 @@ func (h *PaymentHandler) InitiatePayment(c *fiber.Ctx) error {
 // POST /api/v1/payments/webhook
 func (h *PaymentHandler) HandleWebhook(c *fiber.Ctx) error {
 	var payload map[string]interface{}
-
-	// 1. Parse Payload JSON dari Midtrans
 	if err := c.BodyParser(&payload); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"message": "Invalid webhook payload",
+			"status":  "error",
+			"message": "Invalid request body",
 		})
 	}
 
-	// 2. Process di Service
 	if err := h.service.ProcessWebhook(payload); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"status":  "error",
 			"message": err.Error(),
 		})
 	}
 
-	// 3. Return 200 OK (Wajib untuk Midtrans)
-	return c.SendStatus(fiber.StatusOK)
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"status":  "success",
+		"message": "Webhook processed successfully",
+	})
+}
+
+// POST /api/v1/payments/orders/:orderID/cancel
+func (h *PaymentHandler) CancelPayment(c *fiber.Ctx) error {
+	orderID := c.Params("orderID")
+	if orderID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"status":  "error",
+			"message": "Order ID is required",
+		})
+	}
+
+	if err := h.service.CancelPayment(orderID); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"status":  "error",
+			"message": err.Error(),
+		})
+	}
+
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"status":  "success",
+		"message": "Payment cancelled successfully",
+	})
+}
+
+// [BARU] GET /api/v1/payments/orders/:orderID
+func (h *PaymentHandler) GetPaymentStatus(c *fiber.Ctx) error {
+	orderID := c.Params("orderID")
+	if orderID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"status":  "error",
+			"message": "Order ID is required",
+		})
+	}
+
+	resp, err := h.service.GetPaymentByOrderID(orderID)
+	if err != nil {
+		status := fiber.StatusInternalServerError
+		// Handle record not found case
+		if strings.Contains(err.Error(), "record not found") {
+			status = fiber.StatusNotFound
+		}
+
+		return c.Status(status).JSON(fiber.Map{
+			"status":  "error",
+			"message": err.Error(),
+		})
+	}
+
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"status":  "success",
+		"message": "Payment data retrieved successfully",
+		"data":    resp,
+	})
 }

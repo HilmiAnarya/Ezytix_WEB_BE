@@ -26,6 +26,8 @@ type BookingServiceContract interface {
 type PaymentService interface {
 	InitiatePayment(req InitiatePaymentRequest) (*InitiatePaymentResponse, error)
 	ProcessWebhook(payload map[string]interface{}) error
+	CancelPayment(orderID string) error // [BARU]
+	GetPaymentByOrderID(orderID string) (*InitiatePaymentResponse, error) // [BARU]
 }
 
 type paymentService struct {
@@ -265,39 +267,25 @@ func (s *paymentService) constructResponseFromModel(p *models.Payment) *Initiate
 // ==========================================
 
 func (s *paymentService) ProcessWebhook(payload map[string]interface{}) error {
-	// 1. Ambil Data Kunci dari Payload
 	orderID, _ := payload["order_id"].(string)
+	transactionID, _ := payload["transaction_id"].(string)
 	statusCode, _ := payload["status_code"].(string)
 	grossAmount, _ := payload["gross_amount"].(string)
 	signatureKey, _ := payload["signature_key"].(string)
 	transactionStatus, _ := payload["transaction_status"].(string)
-	// fraudStatus, _ := payload["fraud_status"].(string) // Opsional cek fraud
 
-	if orderID == "" {
-		return errors.New("invalid webhook payload")
-	}
-
-	// 2. VERIFIKASI SIGNATURE (Security Check Wajib)
-	// Rumus: SHA512(order_id + status_code + gross_amount + ServerKey)
+	// 1. Verify Signature
 	input := orderID + statusCode + grossAmount + config.AppConfig.MidtransServerKey
 	hash := sha512.Sum512([]byte(input))
-	expectedSignature := hex.EncodeToString(hash[:])
-
-	if signatureKey != expectedSignature {
+	if signatureKey != hex.EncodeToString(hash[:]) {
 		return errors.New("invalid signature key")
 	}
 
-	// 3. Tentukan Status Internal Aplikasi
+	// 2. Map Status
 	var internalStatus string
-	var isPaid bool
-
+	isPaid := false
 	switch transactionStatus {
-	case "capture":
-		// Khusus Kartu Kredit
-		internalStatus = models.PaymentStatusSettlement
-		isPaid = true
-	case "settlement":
-		// Uang sudah masuk (VA, E-Wallet, QRIS)
+	case "capture", "settlement":
 		internalStatus = models.PaymentStatusSettlement
 		isPaid = true
 	case "pending":
@@ -308,27 +296,97 @@ func (s *paymentService) ProcessWebhook(payload map[string]interface{}) error {
 		internalStatus = transactionStatus
 	}
 
-	// 4. Update Database (Payment & Booking)
-	now := time.Now()
+	// 3. Update Payment by Transaction ID (Safe for multiple attempts)
 	var paidAt *time.Time
 	if isPaid {
+		now := time.Now()
 		paidAt = &now
 	}
 
-	// Update Tabel Payment
-	if err := s.repo.UpdatePaymentStatus(orderID, internalStatus, paidAt); err != nil {
+	if err := s.repo.UpdatePaymentStatusByTransactionID(transactionID, internalStatus, paidAt); err != nil {
 		return err
 	}
 
-	// Update Tabel Booking (Hanya jika Paid)
+	// 4. Update Booking if Paid
 	if isPaid {
-		if err := s.bookingRepo.UpdateBookingStatus(orderID, models.BookingStatusPaid); err != nil {
-			return err
-		}
-	} else if internalStatus == models.PaymentStatusCancel {
-		// Opsional: Release seat jika expired/cancel
-		// s.bookingRepo.UpdateBookingStatus(orderID, models.BookingStatusCancelled)
+		return s.bookingRepo.UpdateBookingStatus(orderID, models.BookingStatusPaid)
 	}
 
 	return nil
+}
+
+func (s *paymentService) CancelPayment(orderID string) error {
+	// 1. Ambil transaksi terbaru untuk order ini
+	payment, err := s.repo.FindPaymentByOrderID(orderID)
+	if err != nil {
+		return err
+	}
+
+	// 2. Perluas pengecekan status (Pending ATAU Waiting)
+	isPending := payment.TransactionStatus == models.PaymentStatusPending || payment.TransactionStatus == "waiting"
+
+	if isPending {
+		// 3. HIT MIDTRANS menggunakan TransactionID (Sangat Akurat)
+		fmt.Printf("🚀 Cancelling Transaction ID: %s for Order: %s\n", payment.TransactionID, orderID)
+		
+		_, midErr := s.midtransClient.CancelTransaction(payment.TransactionID)
+		if midErr != nil {
+			// Jika Midtrans bilang sudah cancel/expire (412/404), kita lanjut saja
+			fmt.Printf("⚠️ Midtrans Cancel Note: %v\n", midErr)
+		}
+
+		// 4. Update status di DB lokal berdasarkan TransactionID
+		// Gunakan fungsi repo yang kita buat di Step 1 sebelumnya
+		return s.repo.UpdatePaymentStatusByTransactionID(payment.TransactionID, models.PaymentStatusCancel, nil)
+	}
+
+	return nil
+}
+
+func (s *paymentService) GetPaymentByOrderID(orderID string) (*InitiatePaymentResponse, error) {
+	// A. Cari data payment di Database
+	payment, err := s.repo.FindPaymentByOrderID(orderID)
+	if err != nil {
+		return nil, err
+	}
+
+	// B. Manual Mapping (Model -> DTO)
+	// Kita pindahkan data dari struct 'models.Payment' ke struct response
+	resp := &InitiatePaymentResponse{
+		OrderID:           payment.OrderID,
+		TransactionID:     payment.TransactionID,
+		PaymentType:       payment.PaymentType,
+		// Konversi Decimal ke Float untuk JSON number
+		Amount:            payment.GrossAmount.InexactFloat64(), 
+		TransactionStatus: payment.TransactionStatus,
+	}
+
+	if payment.ExpiryTime != nil {
+		resp.ExpiryTime = *payment.ExpiryTime
+	}
+
+	// C. Mapping Data Spesifik per Metode Pembayaran
+	switch payment.PaymentType {
+	case "bank_transfer":
+		// Pastikan struct response kamu punya field VirtualAccount
+		resp.VirtualAccount = &VirtualAccountData{
+			Bank:     payment.Bank,
+			VaNumber: payment.VaNumber,
+		}
+	case "echannel":
+		resp.MandiriBill = &MandiriBillData{
+			BillKey:    payment.BillKey,
+			BillerCode: payment.BillerCode,
+		}
+	case "qris":
+		resp.Qris = &QrisData{
+			QrUrl: payment.QrUrl,
+		}
+	case "gopay":
+		resp.Gopay = &GopayData{
+			Deeplink: payment.Deeplink,
+		}
+	}
+
+	return resp, nil
 }

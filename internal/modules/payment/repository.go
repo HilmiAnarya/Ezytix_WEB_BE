@@ -17,6 +17,8 @@ type PaymentRepository interface {
 	
 	// State Management
 	UpdatePaymentStatus(orderID string, status string, paidAt *time.Time) error
+	// [BARU] Update spesifik berdasarkan Transaction ID untuk mencegah Race Condition
+	UpdatePaymentStatusByTransactionID(transactionID string, status string, paidAt *time.Time) error
 }
 
 type paymentRepository struct {
@@ -35,7 +37,8 @@ func (r *paymentRepository) CreatePayment(payment *models.Payment) error {
 // 2. Cari berdasarkan Order ID (Primary Lookup untuk User)
 func (r *paymentRepository) FindPaymentByOrderID(orderID string) (*models.Payment, error) {
 	var payment models.Payment
-	err := r.db.Where("order_id = ?", orderID).First(&payment).Error
+	// Kita ambil yang terbaru berdasarkan ID atau CreatedAt DESC
+	err := r.db.Where("order_id = ?", orderID).Order("id desc").First(&payment).Error
 	if err != nil {
 		return nil, err
 	}
@@ -68,4 +71,19 @@ func (r *paymentRepository) UpdatePaymentStatus(orderID string, status string, p
 	return r.db.Model(&models.Payment{}).
 		Where("order_id = ?", orderID).
 		Updates(updates).Error
+}
+
+// 5. [BARU] Update Status (Berdasarkan Transaction ID - Aman untuk Webhook)
+func (r *paymentRepository) UpdatePaymentStatusByTransactionID(transactionID string, status string, paidAt *time.Time) error {
+	updates := map[string]interface{}{
+		"transaction_status": status,
+		"updated_at":         time.Now(),
+	}
+
+	if paidAt != nil {
+		updates["paid_at"] = paidAt
+	}
+
+	// Update HANYA baris yang memiliki transaction_id yang sama dari Midtrans
+	return r.db.Model(&models.Payment{}).Where("transaction_id = ?", transactionID).Updates(updates).Error
 }

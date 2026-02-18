@@ -35,6 +35,11 @@ func PaymentRegisterRoutes(app *fiber.App, db *gorm.DB) {
 	// Menggunakan middleware.JWTMiddleware sesuai standar project kamu
 	api.Post("/initiate", middleware.JWTMiddleware, paymentHandler.InitiatePayment)
 
+	// 2. [BARU] Cancel Payment (Batalkan Transaksi Lama)
+	// Digunakan saat user ingin ganti metode pembayaran
+	api.Post("/orders/:orderID/cancel", middleware.JWTMiddleware, paymentHandler.CancelPayment)
+	api.Get("/orders/:orderID", middleware.JWTMiddleware, paymentHandler.GetPaymentStatus)
+
 	// B. Public Routes (Webhook Midtrans)
 	// TIDAK BOLEH pakai middleware auth, karena Midtrans yang akses
 	api.Post("/webhook", paymentHandler.HandleWebhook)
