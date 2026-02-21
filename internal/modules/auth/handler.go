@@ -5,6 +5,7 @@ import (
 	"gorm.io/gorm"
 
 	jwt "ezytix-be/pkg/jwt"
+	"ezytix-be/pkg/mail" // [BARU] Import mail
 )
 
 type AuthHandler struct {
@@ -12,8 +13,9 @@ type AuthHandler struct {
 }
 
 func NewAuthHandler(db *gorm.DB) *AuthHandler {
+	mailSvc := mail.NewMailService()
 	return &AuthHandler{
-		service: NewAuthService(NewAuthRepository(db)),
+		service: NewAuthService(NewAuthRepository(db), mailSvc),
 	}
 }
 
@@ -129,6 +131,62 @@ func (h *AuthHandler) Me(c *fiber.Ctx) error {
     }
 
     return c.JSON(user)
+}
+
+// ==========================================
+// [BARU] HANDLER VERIFY OTP
+// ==========================================
+func (h *AuthHandler) VerifyOTP(c *fiber.Ctx) error {
+	var req VerifyOTPRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid request"})
+	}
+
+	resp, access, refresh, err := h.service.VerifyOTP(req)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	// Set Cookie persis seperti fungsi Login
+	c.Cookie(&fiber.Cookie{
+		Name:     "access_token",
+		Value:    access,
+		HTTPOnly: true,
+		SameSite: "Strict",
+		Path:     "/",
+		MaxAge:   60 * 15,
+	})
+	c.Cookie(&fiber.Cookie{
+		Name:     "refresh_token",
+		Value:    refresh,
+		HTTPOnly: true,
+		SameSite: "Strict",
+		Path:     "/",
+		MaxAge:   60 * 60 * 24 * 7,
+	})
+
+	return c.JSON(fiber.Map{
+		"message": "verifikasi berhasil",
+		"user":    resp.User,
+	})
+}
+
+// ==========================================
+// [BARU] HANDLER RESEND OTP
+// ==========================================
+func (h *AuthHandler) ResendOTP(c *fiber.Ctx) error {
+	var req ResendOTPRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid request"})
+	}
+
+	if err := h.service.ResendOTP(req); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	return c.JSON(fiber.Map{
+		"message": "OTP baru telah dikirim ke email",
+	})
 }
 
 func (h *AuthHandler) Logout(c *fiber.Ctx) error {

@@ -16,6 +16,10 @@ func AuthRegisterRoutes(app *fiber.App, db *gorm.DB) {
 	auth.Post("/login", h.Login)
 	auth.Post("/refresh", h.Refresh)
 
+	// [BARU] Rute OTP (Publik, tanpa token)
+	auth.Post("/verify-otp", h.VerifyOTP)
+	auth.Post("/resend-otp", h.ResendOTP)
+
 	authProtected := auth.Group("/")
 	authProtected.Use(middleware.JWTMiddleware)
 

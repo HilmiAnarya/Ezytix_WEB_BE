@@ -1,12 +1,17 @@
 package auth
 
 import (
+	"crypto/rand"
 	"errors"
+	"fmt"
+	"math/big"
 	"regexp"
+	"time"
 
 	"ezytix-be/internal/models"
 	"ezytix-be/pkg/hash"
 	"ezytix-be/pkg/jwt"
+	"ezytix-be/pkg/mail" // [BARU] Import mail service
 )
 
 type AuthService interface {
@@ -16,17 +21,37 @@ type AuthService interface {
 	GetUserByID(id uint) (*models.User, error) // NEW
     ChangePassword(userID uint, req ChangePasswordRequest) error
     UpdateProfile(userID uint, req UpdateProfileRequest) (*models.User, error)
+
+	// [BARU] Interface OTP
+	VerifyOTP(req VerifyOTPRequest) (*LoginResponse, string, string, error)
+	ResendOTP(req ResendOTPRequest) error
 }
 
 type authService struct {
 	repo AuthRepository
+	mail mail.MailService // [BARU] Tambahkan properti ini
 }
 
-func NewAuthService(repo AuthRepository) AuthService {
-	return &authService{repo}
+func NewAuthService(repo AuthRepository, mailService mail.MailService) AuthService {
+	return &authService{
+		repo: repo,
+		mail: mailService,
+	}
+}
+
+// Helper Generator OTP 6 Digit
+func generateOTPCode() string {
+	const charset = "0123456789"
+	b := make([]byte, 6)
+	for i := range b {
+		n, _ := rand.Int(rand.Reader, big.NewInt(int64(len(charset))))
+		b[i] = charset[n.Int64()]
+	}
+	return string(b)
 }
 
 func (s *authService) Register(req RegisterRequest) (*models.User, error) {
+    // Validasi dasar (Tetap sama seperti aslimu)
 	if req.FullName == "" || req.Username == "" || req.Email == "" || req.Phone == "" || req.Password == "" {
 		return nil, errors.New("semua field harus diisi")
 	}
@@ -57,17 +82,35 @@ func (s *authService) Register(req RegisterRequest) (*models.User, error) {
 	}
 
 	user := &models.User{
-		FullName: req.FullName,
-		Username: req.Username,
-		Email:    req.Email,
-		Phone:    req.Phone,
-		Password: hashed,
-		Role:     models.RoleCustomer,
+		FullName:   req.FullName,
+		Username:   req.Username,
+		Email:      req.Email,
+		Phone:      req.Phone,
+		Password:   hashed,
+		Role:       models.RoleCustomer,
+		IsVerified: false, // Default belum verifikasi
 	}
 
 	if err := s.repo.CreateUser(user); err != nil {
 		return nil, err
 	}
+
+	// ==========================================
+	// [BARU] LOGIC CREATE & SEND OTP SETELAH REGISTER
+	// ==========================================
+	otpCode := generateOTPCode()
+	otpData := &models.UserOTP{
+		UserID:    user.ID,
+		OTPCode:   otpCode,
+		ExpiredAt: time.Now().Add(5 * time.Minute),
+	}
+
+	if err := s.repo.CreateOrUpdateOTP(otpData); err != nil {
+		return nil, fmt.Errorf("berhasil register tapi gagal membuat OTP: %v", err)
+	}
+
+	// Kirim via Email (Berjalan asinkron agar response tidak lambat)
+	go s.mail.SendOTPEmail(user.Email, user.FullName, otpCode)
 
 	return user, nil
 }
@@ -93,6 +136,10 @@ func (s *authService) Login(req LoginRequest) (*LoginResponse, string, string, e
         return nil, "", "", errors.New("password salah")
     }
 
+	if !user.IsVerified {
+		return nil, "", "", errors.New("akun belum diverifikasi. silakan cek email Anda untuk memasukkan kode OTP")
+	}
+
     access, err := jwt.CreateAccessToken(user.ID, string(user.Role), user.Email, user.Phone)
     if err != nil {
         return nil, "", "", errors.New("gagal membuat access token")
@@ -108,7 +155,77 @@ func (s *authService) Login(req LoginRequest) (*LoginResponse, string, string, e
     }, access, refresh, nil
 }
 
+// ==========================================
+// [BARU] FUNGSI VERIFY OTP
+// ==========================================
+func (s *authService) VerifyOTP(req VerifyOTPRequest) (*LoginResponse, string, string, error) {
+	user, err := s.repo.FindByEmail(req.Email)
+	if err != nil || user == nil {
+		return nil, "", "", errors.New("user tidak ditemukan")
+	}
 
+	if user.IsVerified {
+		return nil, "", "", errors.New("akun ini sudah terverifikasi")
+	}
+
+	otp, err := s.repo.FindOTPByUserID(user.ID)
+	if err != nil {
+		return nil, "", "", errors.New("kode OTP tidak ditemukan atau sudah dihapus")
+	}
+
+	if otp.OTPCode != req.OTPCode {
+		return nil, "", "", errors.New("kode OTP salah")
+	}
+
+	if time.Now().After(otp.ExpiredAt) {
+		return nil, "", "", errors.New("kode OTP sudah kadaluarsa. silakan minta kirim ulang")
+	}
+
+	// Validasi Sukses: Ubah is_verified jadi true & hapus OTP
+	user.IsVerified = true
+	if err := s.repo.UpdateUser(user); err != nil {
+		return nil, "", "", errors.New("gagal memverifikasi akun")
+	}
+	s.repo.DeleteOTP(user.ID) // Hapus OTP bekas
+
+	// Langsung Buatkan Token Login
+	access, _ := jwt.CreateAccessToken(user.ID, string(user.Role), user.Email, user.Phone)
+	refresh, _ := jwt.CreateRefreshToken(user.ID)
+
+	return &LoginResponse{User: user}, access, refresh, nil
+}
+
+
+// ==========================================
+// [BARU] FUNGSI RESEND OTP
+// ==========================================
+func (s *authService) ResendOTP(req ResendOTPRequest) error {
+	user, err := s.repo.FindByEmail(req.Email)
+	if err != nil || user == nil {
+		return errors.New("user tidak ditemukan")
+	}
+
+	if user.IsVerified {
+		return errors.New("akun ini sudah terverifikasi")
+	}
+
+	// Generate OTP Baru & Geser expired 5 menit lagi
+	newOTP := generateOTPCode()
+	otpData := &models.UserOTP{
+		UserID:    user.ID,
+		OTPCode:   newOTP,
+		ExpiredAt: time.Now().Add(5 * time.Minute),
+	}
+
+	if err := s.repo.CreateOrUpdateOTP(otpData); err != nil {
+		return errors.New("gagal membuat OTP baru")
+	}
+
+	// Kirim Email
+	go s.mail.SendOTPEmail(user.Email, user.FullName, newOTP)
+
+	return nil
+}
 
 func (s *authService) Refresh(refreshToken string) (*LoginResponse, string, string, error) {
     userID, err := jwt.ValidateRefreshToken(refreshToken)

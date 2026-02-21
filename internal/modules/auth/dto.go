@@ -32,3 +32,12 @@ type UpdateProfileRequest struct {
 	Email    string `json:"email" validate:"required,email"`
 	Phone    string `json:"phone" validate:"required"`
 }
+
+type VerifyOTPRequest struct {
+	Email   string `json:"email" validate:"required,email"`
+	OTPCode string `json:"otp_code" validate:"required,len=6"`
+}
+
+type ResendOTPRequest struct {
+	Email string `json:"email" validate:"required,email"`
+}

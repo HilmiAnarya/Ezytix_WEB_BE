@@ -5,9 +5,10 @@ import (
 	"ezytix-be/internal/modules/auth"
 	"ezytix-be/internal/modules/flight"
 	"ezytix-be/internal/scheduler"
-	
+	"ezytix-be/pkg/mail"
+
 	// ❌ HAPUS IMPORT PAYMENT
-	// "ezytix-be/internal/modules/payment" 
+	// "ezytix-be/internal/modules/payment"
 
 	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
@@ -23,7 +24,7 @@ func BookingRegisterRoutes(app *fiber.App, db *gorm.DB) {
 
 	// 2. Setup Service
 	flightService := flight.NewFlightService(flightRepo)
-	authService := auth.NewAuthService(authRepo)
+	authService := auth.NewAuthService(authRepo, mail.NewMailService()) // [BARU] Tambahkan mail service
 	
 	// ❌ HAPUS PaymentService init
 	
