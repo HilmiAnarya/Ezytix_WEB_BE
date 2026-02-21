@@ -2,9 +2,10 @@ package server
 
 import (
 	"ezytix-be/internal/handlers"
-	"ezytix-be/internal/middleware"
-	
+	//"ezytix-be/internal/middleware"
+
 	// --- Import Module ---
+	"ezytix-be/internal/modules/admin"
 	"ezytix-be/internal/modules/airline" // <--- 1. IMPORT INI
 	"ezytix-be/internal/modules/airport"
 	"ezytix-be/internal/modules/auth"
@@ -55,9 +56,14 @@ func (s *FiberServer) RegisterRoutes() {
 	booking.BookingRegisterRoutes(s.App, s.DB.GetGORMDB())
 
 	// ================================
+	// ADMIN MODULE
+	// ================================
+	admin.AdminRegisterRoutes(s.App, s.DB.GetGORMDB()) // <--- Tambahkan baris ini
+
+	// ================================
 	// ADMIN ROUTES (Global Admin Group - Optional jika belum dipindah ke modul)
 	// ================================
-	admin := s.App.Group("/api/v1/admin")
-	admin.Use(middleware.JWTMiddleware)
-	admin.Use(middleware.RequireRole("admin"))
+	// admin := s.App.Group("/api/v1/admin")
+	// admin.Use(middleware.JWTMiddleware)
+	// admin.Use(middleware.RequireRole("admin"))
 }

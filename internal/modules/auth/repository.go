@@ -18,6 +18,7 @@ type AuthRepository interface {
 
 	CreateUser(user *models.User) error
 	UpdatePassword(userID uint, hashedPassword string) error
+	UpdateUser(user *models.User) error
 }
 
 type authRepository struct {
@@ -94,4 +95,8 @@ func (r *authRepository) UpdatePassword(userID uint, hashedPassword string) erro
     return r.db.Model(&models.User{}).
         Where("id = ?", userID).
         Update("password", hashedPassword).Error
+}
+
+func (r *authRepository) UpdateUser(user *models.User) error {
+	return r.db.Save(user).Error
 }

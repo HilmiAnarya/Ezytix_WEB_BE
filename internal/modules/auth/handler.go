@@ -161,3 +161,33 @@ func (h *AuthHandler) ChangePassword(c *fiber.Ctx) error {
         "message": "password changed successfully. please login again",
     })
 }
+
+func (h *AuthHandler) UpdateProfile(c *fiber.Ctx) error {
+	var req UpdateProfileRequest
+
+	// Parse JSON
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid request body",
+		})
+	}
+
+	// Ambil userID dari JWT claims
+	claims := c.Locals("user").(*jwt.JWTClaims)
+	userID := claims.UserID
+
+	// Panggil service
+	updatedUser, err := h.service.UpdateProfile(userID, req)
+	if err != nil {
+		// Jika error karena conflict data (email/username kepake) -> 409 Conflict
+		// Bisa disesuaikan jadi 400 Bad Request jika mau
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"message": "profil berhasil diperbarui",
+		"user":    updatedUser,
+	})
+}

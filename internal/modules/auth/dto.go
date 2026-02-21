@@ -26,3 +26,9 @@ type LoginResponse struct {
 	User *models.User `json:"user"`
 }
 
+type UpdateProfileRequest struct {
+	FullName string `json:"full_name" validate:"required"`
+	Username string `json:"username" validate:"required,min=4,max=16"`
+	Email    string `json:"email" validate:"required,email"`
+	Phone    string `json:"phone" validate:"required"`
+}

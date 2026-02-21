@@ -15,7 +15,7 @@ type AuthService interface {
 	Refresh(refreshToken string) (*LoginResponse, string, string, error)
 	GetUserByID(id uint) (*models.User, error) // NEW
     ChangePassword(userID uint, req ChangePasswordRequest) error
-
+    UpdateProfile(userID uint, req UpdateProfileRequest) (*models.User, error)
 }
 
 type authService struct {
@@ -177,3 +177,47 @@ func (s *authService) ChangePassword(userID uint, req ChangePasswordRequest) err
     return nil
 }
 
+func (s *authService) UpdateProfile(userID uint, req UpdateProfileRequest) (*models.User, error) {
+	// 1. Ambil user saat ini
+	user, err := s.repo.FindByID(userID)
+	if err != nil {
+		return nil, errors.New("user tidak ditemukan")
+	}
+
+	// 2. Validasi Username jika berubah
+	if req.Username != user.Username {
+		existingUser, _ := s.repo.FindByUsername(req.Username)
+		if existingUser != nil {
+			return nil, errors.New("username sudah digunakan oleh orang lain")
+		}
+	}
+
+	// 3. Validasi Email jika berubah
+	if req.Email != user.Email {
+		existingEmail, _ := s.repo.FindByEmail(req.Email)
+		if existingEmail != nil {
+			return nil, errors.New("email sudah digunakan oleh orang lain")
+		}
+	}
+
+	// 4. Validasi Phone jika berubah
+	if req.Phone != user.Phone {
+		existingPhone, _ := s.repo.FindByPhone(req.Phone)
+		if existingPhone != nil {
+			return nil, errors.New("nomor telepon sudah digunakan oleh orang lain")
+		}
+	}
+
+	// 5. Terapkan perubahan
+	user.FullName = req.FullName
+	user.Username = req.Username
+	user.Email = req.Email
+	user.Phone = req.Phone
+
+	// 6. Simpan ke database
+	if err := s.repo.UpdateUser(user); err != nil {
+		return nil, errors.New("gagal memperbarui profil")
+	}
+
+	return user, nil
+}
