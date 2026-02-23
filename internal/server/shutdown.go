@@ -7,7 +7,6 @@ import (
 )
 
 func GracefulShutdown(s *FiberServer) {
-	// Hanya melakukan shutdown, tidak menunggu signal
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 

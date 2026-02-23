@@ -19,13 +19,9 @@ func FlightRegisterRoutes(app *fiber.App, db *gorm.DB) {
 	flights.Get("/:id", handler.GetFlightByID)
 
 	admin := api.Group("/admin/flights")
-	
 	admin.Use(middleware.JWTMiddleware)
 	admin.Use(middleware.RequireRole("admin"))
-
 	admin.Post("/", handler.CreateFlight)
-	
 	admin.Put("/:id", handler.UpdateFlight)
-	
 	admin.Delete("/:id", handler.DeleteFlight)
 }

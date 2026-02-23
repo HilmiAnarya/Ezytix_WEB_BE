@@ -12,8 +12,6 @@ import (
 
 	"ezytix-be/internal/config"
 	"ezytix-be/internal/server"
-	
-	// Pastikan alias ini benar jika nama package di dalam foldernya berbeda
 	pdfprinter "ezytix-be/internal/utils/pdf_printer"
 
 	"github.com/joho/godotenv"
@@ -21,42 +19,26 @@ import (
 
 func main() {
 	log.Println("🖨️  Mulai Test Printer Engine...")
-
-	// --- 1. SETUP PATH ASSETS (PERBAIKAN UTAMA DISINI) ---
-	// Kita cari tahu dulu kita sedang jalan di folder mana
 	cwd, err := os.Getwd()
 	if err != nil {
 		log.Fatalf("❌ Gagal mendapatkan working directory: %v", err)
 	}
-
-	// Tentukan lokasi folder assets secara absolut
-	// Asumsi: folder 'assets' ada di root project (sejajar dengan main.go/go.mod)
 	assetsPath := filepath.Join(cwd, "internal", "assets", "images")
 	
 	fmt.Printf("📂 Mencari gambar di folder: %s\n", assetsPath)
 
-	// Helper function biar kodingan rapi & error tertangkap
 	loadImage := func(filename string) string {
 		fullPath := filepath.Join(assetsPath, filename)
 		base64Str, err := pdfprinter.ImageToBase64(fullPath)
 		if err != nil {
-			// LANGSUNG STOP PROGRAM JIKA GAMBAR TIDAK KETEMU
-			// Supaya kamu sadar kalau path-nya salah
 			log.Fatalf("❌ FATAL: Gagal load gambar '%s'. \n   Cek apakah file ada di: %s\n   Error: %v", filename, fullPath, err)
 		}
 		fmt.Printf("✅ Berhasil load: %s\n", filename)
 		return base64Str
 	}
 
-	// --- 2. LOAD GAMBAR (Dengan Error Checking) ---
-	// Perhatikan nama file harus SAMA PERSIS (termasuk huruf besar/kecil)
 	invHeader := loadImage("invoice_header.png")
 	invFooter := loadImage("invoice_footer.png")
-	
-	// Cek nama file tiket kamu, sesuaikan dengan yang ada di folder assets
-	// Di chat sebelumnya kamu pakai "ticket_header.png", di main.go kamu pakai "eticket_header.png"
-	// Saya pakai "ticket_header.png" sesuai yang kamu upload sebelumnya. 
-	// GANTI JIKA NAMA FILE DI KOMPUTERMU BEDA.
 	ticketHeader := loadImage("eticket_header.png") 
 	ticketFooter := loadImage("eticket_footer.png")
 
@@ -64,7 +46,6 @@ func main() {
 	
 	dummyQR := ticketHeader 
 
-	// --- 3. TEST INVOICE ---
 	invoiceData := pdfprinter.InvoiceData{
 		HeaderImage:   invHeader,
 		FooterImage:   invFooter,
@@ -88,8 +69,7 @@ func main() {
 		GrandTotal: "2.520.000",
 	}
 
-	// Gunakan path absolut juga untuk template
-	templatePathInvoice := "invoice.html" // Pastikan logic di GeneratePDF membacanya dari folder templates
+	templatePathInvoice := "invoice.html" 
 	err = pdfprinter.GeneratePDF(templatePathInvoice, invoiceData, "test_invoice_final.pdf")
 	if err != nil {
 		log.Fatalf("❌ Error Generate Invoice: %v", err)
@@ -105,7 +85,6 @@ func main() {
         })
     }
 
-	// --- 4. TEST E-TICKET ---
 	ticketData := pdfprinter.TicketData{
 		HeaderImage: ticketHeader,
 		FooterImage: ticketFooter,
@@ -116,7 +95,6 @@ func main() {
 		QRCode:      dummyQR,
 		
 		Segments: []pdfprinter.FlightSegment{
-			// SEGMENT 1: CGK -> DPS
 			{
 				AirlineName:  "Lion Air",
 				AirlineLogo:  lion,
@@ -131,7 +109,6 @@ func main() {
 				Duration: "2 J 30 M",
 				Transit: pdfprinter.TransitDetail{IsTransit: true, Location: "Denpasar", Duration: "2 Jam"},
 			},
-			// SEGMENT 2: DPS -> LOP
 			{
 				AirlineName:  "Wings Air",
 				AirlineLogo:  lion,
@@ -156,7 +133,6 @@ func main() {
 	}
 	log.Println("✅ Ticket PDF berhasil dibuat!")
 
-	// --- 5. START SERVER (KODE ASLI KAMU) ---
 	godotenv.Load()
 	config.LoadConfig()
 

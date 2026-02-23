@@ -2,7 +2,7 @@ package airline
 
 import (
 	"errors"
-	"strings" // Penting untuk memaksa Uppercase IATA
+	"strings" 
 	"ezytix-be/internal/models"
 )
 
@@ -23,7 +23,6 @@ func NewAirlineService(repo AirlineRepository) AirlineService {
 }
 
 func (s *airlineService) CreateAirline(req CreateAirlineRequest) (*models.Airline, error) {
-	// Business Logic: IATA Code wajib Uppercase (misal: "ga" -> "GA")
 	iataUpper := strings.ToUpper(req.IATA)
 
 	airline := &models.Airline{
@@ -33,7 +32,6 @@ func (s *airlineService) CreateAirline(req CreateAirlineRequest) (*models.Airlin
 	}
 
 	if err := s.repo.CreateAirline(airline); err != nil {
-		// Handle duplicate IATA error dari database
 		if strings.Contains(err.Error(), "duplicate key") {
 			return nil, errors.New("airline with this IATA code already exists")
 		}
@@ -56,13 +54,11 @@ func (s *airlineService) GetAirlineByID(id uint) (*models.Airline, error) {
 }
 
 func (s *airlineService) UpdateAirline(id uint, req UpdateAirlineRequest) (*models.Airline, error) {
-	// 1. Cek apakah data ada
 	existingAirline, err := s.repo.GetAirlineByID(id)
 	if err != nil {
 		return nil, errors.New("airline not found")
 	}
 
-	// 2. Partial Update (Hanya update jika field diisi)
 	if req.Name != "" {
 		existingAirline.Name = req.Name
 	}
@@ -73,7 +69,6 @@ func (s *airlineService) UpdateAirline(id uint, req UpdateAirlineRequest) (*mode
 		existingAirline.LogoURL = req.LogoURL
 	}
 
-	// 3. Simpan perubahan
 	if err := s.repo.UpdateAirline(existingAirline); err != nil {
 		return nil, err
 	}
@@ -82,7 +77,6 @@ func (s *airlineService) UpdateAirline(id uint, req UpdateAirlineRequest) (*mode
 }
 
 func (s *airlineService) DeleteAirline(id uint) error {
-	// Cek keberadaan data sebelum delete
 	_, err := s.repo.GetAirlineByID(id)
 	if err != nil {
 		return errors.New("airline not found")

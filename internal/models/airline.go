@@ -4,7 +4,7 @@ import "time"
 
 type Airline struct {
 	ID        uint      `gorm:"primaryKey;autoIncrement" json:"id"`
-	IATA      string    `gorm:"type:varchar(10);unique;not null" json:"IATA"` // IATA Code (GA, JT)
+	IATA      string    `gorm:"type:varchar(10);unique;not null" json:"IATA"`
 	Name      string    `gorm:"type:varchar(100);not null" json:"name"`
 	LogoURL   string    `gorm:"type:text" json:"logo_url"`
 	CreatedAt time.Time `json:"created_at"`

@@ -35,20 +35,17 @@ type BookingService interface {
 type bookingService struct {
 	repo          BookingRepository
 	flightService flight.FlightService
-	// [REMOVED] paymentService
 	authService   auth.AuthService
 }
 
 func NewBookingService(
 	repo BookingRepository,
 	flightService flight.FlightService,
-	// [REMOVED] paymentService
 	authService auth.AuthService,
 ) BookingService {
 	return &bookingService{
 		repo:          repo,
 		flightService: flightService,
-		// [REMOVED] paymentService: paymentService,
 		authService:   authService,
 	}
 }
@@ -70,13 +67,11 @@ func (s *bookingService) CreateOrder(userID uint, req CreateOrderRequest) (*Book
 		tripType = models.TripTypeRoundTrip
 	}
 
-	// [STRICT EXPIRY] Set Expiry Awal (misal 55 menit dari sekarang)
-	// User harus initiate payment sebelum waktu ini.
 	expiryDuration := 55 * time.Minute
 	expiryAt := time.Now().Add(expiryDuration)
 
 	for _, item := range req.Items {
-		flightData, err := s.flightService.GetFlightByID(item.FlightID) // Sesuaikan: GetFlightById atau GetFlightByID
+		flightData, err := s.flightService.GetFlightByID(item.FlightID)
 		if err != nil {
 			return nil, errors.New("flight not found")
 		}
@@ -108,8 +103,6 @@ func (s *bookingService) CreateOrder(userID uint, req CreateOrderRequest) (*Book
 			TotalPassengers: len(item.Passengers),
 			TotalPrice:      flightTotalPrice,
 			Status:          models.BookingStatusPending,
-			
-			// [NEW] Simpan Expiry Time ke Database
 			ExpiredAt:       &expiryAt, 
 			CreatedAt:       time.Now(),
 		}
@@ -152,15 +145,12 @@ func (s *bookingService) CreateOrder(userID uint, req CreateOrderRequest) (*Book
 	if err := s.repo.CreateOrder(bookingsToSave); err != nil {
 		return nil, err
 	}
-
-	// [REMOVED] Logic CreatePayment dihapus total.
 	
 	return &BookingResponse{
 		OrderID:         orderID,
 		TotalAmount:     grandTotal,
 		Status:          models.BookingStatusPending,
 		TransactionTime: time.Now(),
-		// [FIXED] ExpiryDate diisi dari variabel yang sama dengan DB
 		ExpiryTime:      &expiryAt,
 		Bookings:        bookingResponses,
 	}, nil
@@ -169,9 +159,6 @@ func (s *bookingService) CreateOrder(userID uint, req CreateOrderRequest) (*Book
 func (s *bookingService) ProcessExpiredBookings() error {
 	log.Println("[CRON] --- Starting Scheduler Job ---")
 
-	// TUGAS 1: Batalkan PENDING yang sudah lewat ExpiredAt
-	// Logic baru: Cukup cek NOW() > expired_at
-	
 	expiredPendingBookings, err := s.repo.GetExpiredBookings(time.Now())
 	if err != nil {
 		log.Printf("[CRON] Error fetching pending expired bookings: %v\n", err)
@@ -189,7 +176,6 @@ func (s *bookingService) ProcessExpiredBookings() error {
 		}
 	}
 
-	// TUGAS 2: Update PAID -> EXPIRED (Past Flight)
 	err = s.repo.UpdatePastBookingsToExpired()
 	if err != nil {
 		log.Printf("[CRON] Error updating past flights: %v\n", err)
@@ -207,13 +193,10 @@ func (s *bookingService) GetUserBookings(userID uint) ([]MyBookingResponse, erro
 
 	var responses []MyBookingResponse
 	for _, b := range bookings {
-		
-		// 1. Mapping Flight Detail
 		var seatClass, classCode string
 		if len(b.Details) > 0 {
 			seatClass = b.Details[0].SeatClass
 		}
-		// Cari Class Code (Sub-class)
 		for _, fc := range b.Flight.FlightClasses {
 			if strings.EqualFold(fc.SeatClass, seatClass) {
 				classCode = fc.ClassCode
@@ -229,28 +212,22 @@ func (s *bookingService) GetUserBookings(userID uint) ([]MyBookingResponse, erro
 			Destination:       fmt.Sprintf("%s (%s)", b.Flight.DestinationAirport.CityName, b.Flight.DestinationAirport.Code),
 			DepartureTime:     b.Flight.DepartureTime,
 			ArrivalTime:       b.Flight.ArrivalTime,
-			
-			// [UPDATED] Ambil data langsung dari Model Flight & Utils
 			DurationMinutes:   b.Flight.TotalDuration, 
 			DurationFormatted: utils.FormatDuration(b.Flight.TotalDuration),
-			TransitInfo:       b.Flight.TransitInfo, // Ambil dari DB ("Direct", "1 Transit")
-			
+			TransitInfo:       b.Flight.TransitInfo,
 			SeatClass:         seatClass,
 			ClassCode:         classCode,
 		}
 
-		// 2. Mapping Passengers (NEW)
 		var passengerList []PassengerDetailResponse
 		for _, detail := range b.Details {
 			passengerList = append(passengerList, PassengerDetailResponse{
 				FullName:     detail.PassengerName,
-				Type:         detail.PassengerType, // adult/child/infant
+				Type:         detail.PassengerType,
 				TicketNumber: detail.TicketNumber,
 				SeatClass:    detail.SeatClass,
 			})
 		}
-
-		// 3. Expiry Logic
 		var expiryTime *time.Time
 		if b.Status == models.BookingStatusPending {
 			expiryTime = b.ExpiredAt
@@ -264,7 +241,7 @@ func (s *bookingService) GetUserBookings(userID uint) ([]MyBookingResponse, erro
 			CreatedAt:   b.CreatedAt,
 			ExpiryTime:  expiryTime,
 			Flight:      flightDetail,
-			Passengers:  passengerList, // Masukkan list penumpang
+			Passengers:  passengerList,
 		}
 		responses = append(responses, resp)
 	}
@@ -273,7 +250,6 @@ func (s *bookingService) GetUserBookings(userID uint) ([]MyBookingResponse, erro
 }
 
 func (s *bookingService) DownloadInvoice(ctx context.Context, orderID string) ([]byte, error) {
-	// 1. AMBIL SEMUA BOOKING DLM SATU ORDER (Return Slice/Array)
 	bookings, err := s.repo.GetBookingsForInvoiceByOrderID(orderID)
 	if err != nil {
 		return nil, fmt.Errorf("bookings not found: %w", err)
@@ -282,16 +258,13 @@ func (s *bookingService) DownloadInvoice(ctx context.Context, orderID string) ([
 		return nil, fmt.Errorf("no bookings found for order id: %s", orderID)
 	}
 
-	// Ambil Booking Pertama sebagai referensi Data User (Customer)
 	mainBooking := bookings[0]
 
-	// 2. AMBIL DATA PAYMENT
 	payment, err := s.repo.GetPaymentByOrderID(orderID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch payment: %w", err)
 	}
 
-	// Setup Path Assets
 	cwd, _ := os.Getwd()
 	assetsPath := filepath.Join(cwd, "internal", "assets", "images")
 	getHeader := func(name string) string {
@@ -303,16 +276,13 @@ func (s *bookingService) DownloadInvoice(ctx context.Context, orderID string) ([
 		return b64
 	}
 
-	// 3. LOGIC ITEM BELANJA (INVOICE ITEMS) - MULTI BOOKING
 	var invoiceItems []pdfprinter.InvoiceItem
 	var totalAmountDecimal decimal.Decimal
 	counter := 1
 
-	// Loop setiap booking (Misal: Loop 1 = Pergi, Loop 2 = Pulang)
 	for _, booking := range bookings {
 		totalAmountDecimal = totalAmountDecimal.Add(booking.TotalPrice)
 
-		// Grouping Item per Booking (Dewasa/Anak)
 		type groupItem struct {
 			Count int64
 			Total decimal.Decimal
@@ -329,7 +299,6 @@ func (s *bookingService) DownloadInvoice(ctx context.Context, orderID string) ([
 			groupedItems[pType].Total = groupedItems[pType].Total.Add(detail.Price)
 		}
 
-		// Siapkan Deskripsi Penerbangan
 		flightDesc := "Penerbangan"
 		flightDateStr := "-"
 		if booking.Flight.ID != 0 {
@@ -344,7 +313,6 @@ func (s *bookingService) DownloadInvoice(ctx context.Context, orderID string) ([
 			}
 		}
 
-		// Masukkan ke List Item Invoice
 		for pType, data := range groupedItems {
 			fullDesc := fmt.Sprintf("%s (%s) - %s", flightDesc, pType, flightDateStr)
 			totalFloat, _ := data.Total.Float64()
@@ -361,8 +329,6 @@ func (s *bookingService) DownloadInvoice(ctx context.Context, orderID string) ([
 		}
 	}
 
-	// 4. MAPPING PENUMPANG (Ambil dari Main Booking saja agar tidak duplikat)
-	// Asumsi: Penumpang berangkat dan pulang adalah orang yang sama.
 	var passengers []pdfprinter.Passenger
 	for _, detail := range mainBooking.Details {
 		passengers = append(passengers, pdfprinter.Passenger{
@@ -371,13 +337,11 @@ func (s *bookingService) DownloadInvoice(ctx context.Context, orderID string) ([
 		})
 	}
 
-	// 5. MAPPING METADATA & PAYMENT
 	paymentMethod := "Menunggu Pembayaran"
 	paymentStatus := "BELUM LUNAS"
 	paymentDate := "-"
 
 	if payment != nil {
-		// Logic Payment Method
 		switch payment.PaymentType {
 		case "bank_transfer":
 			paymentMethod = fmt.Sprintf("%s Virtual Account", strings.ToUpper(payment.Bank))
@@ -391,7 +355,6 @@ func (s *bookingService) DownloadInvoice(ctx context.Context, orderID string) ([
 			paymentMethod = strings.Title(strings.ReplaceAll(payment.PaymentType, "_", " "))
 		}
 
-		// Logic Payment Status
 		switch payment.TransactionStatus {
 		case models.PaymentStatusSettlement:
 			paymentStatus = "LUNAS"
@@ -410,33 +373,25 @@ func (s *bookingService) DownloadInvoice(ctx context.Context, orderID string) ([
 		paymentDate = payment.CreatedAt.Format("02 January 2006, 15:04")
 	}
 
-	// Final Calculation
 	finalTotalFloat, _ := totalAmountDecimal.Float64()
 
-	// 6. SUSUN DATA FINAL
 	invoiceData := pdfprinter.InvoiceData{
 		HeaderImage:   getHeader("invoice_header.png"),
 		FooterImage:   getHeader("invoice_footer.png"),
-		
-		InvoiceNumber: mainBooking.OrderID, // Menggunakan Order ID sebagai No Invoice (Lebih Konsisten)
+		InvoiceNumber: mainBooking.OrderID,
 		Date:          paymentDate,
-		
 		CustomerName:  mainBooking.User.FullName,
 		CustomerEmail: mainBooking.User.Email,
 		CustomerPhone: mainBooking.User.Phone,
-		
 		PaymentMethod: paymentMethod,
 		PaymentStatus: paymentStatus,
-		
 		Passengers:    passengers,
 		Items:         invoiceItems,
-		
 		SubTotal:      utils.FormatRupiah(finalTotalFloat),
 		ServiceFee:    "Rp 0",
 		GrandTotal:    utils.FormatRupiah(finalTotalFloat),
 	}
 
-	// 7. Generate PDF
 	tmpFileName := fmt.Sprintf("invoice_%s_%d.pdf", orderID, time.Now().Unix())
 	tmpFilePath := filepath.Join(cwd, tmpFileName)
 
@@ -456,20 +411,17 @@ func (s *bookingService) DownloadInvoice(ctx context.Context, orderID string) ([
 }
 
 func (s *bookingService) DownloadEticket(ctx context.Context, bookingCode string) ([]byte, error) {
-	// 1. AMBIL DATA BOOKING
 	booking, err := s.repo.GetBookingForTicket(bookingCode)
 	if err != nil {
 		return nil, fmt.Errorf("booking not found: %w", err)
 	}
 
-	// 2. SETUP PATH ASSETS (SAMA SEPERTI INVOICE)
 	cwd, err := os.Getwd()
 	if err != nil {
 		return nil, fmt.Errorf("gagal get working directory: %v", err)
 	}
 	assetsPath := filepath.Join(cwd, "internal", "assets", "images")
 
-	// Helper Inline (SAMA SEPERTI INVOICE)
 	getHeader := func(name string) string {
 		fullPath := filepath.Join(assetsPath, name)
 		b64, err := pdfprinter.ImageToBase64(fullPath)
@@ -480,28 +432,20 @@ func (s *bookingService) DownloadEticket(ctx context.Context, bookingCode string
 		return b64
 	}
 
-	// 3. GENERATE QR CODE
 	qrCodeBase64, err := pdfprinter.GenerateQRCodeBase64(booking.BookingCode)
 	if err != nil {
 		fmt.Printf("Warning: Failed to generate QR: %v\n", err)
 		qrCodeBase64 = ""
 	}
 
-	// 4. MAPPING FLIGHT SEGMENTS & TRANSIT LOGIC
 	var segments []pdfprinter.FlightSegment
 
-	// Pastikan data flight & legs tersedia
 	if booking.Flight.ID != 0 && len(booking.Flight.FlightLegs) > 0 {
 		legs := booking.Flight.FlightLegs
 		totalLegs := len(legs)
 
 		for i, leg := range legs {
-			// Setup Logo Airline
-			// TODO: Jika nanti ada URL gambar di DB, ganti ini. Sekarang pakai placeholder.
-			airlineLogo := getHeader("Lion.png") 
-
-			// Jika di database ada URL gambar, coba download
-			// Pastikan field di model Airline kamu bernama "Image" (sesuaikan jika namanya "Logo" atau "ImageUrl")
+			airlineLogo := getHeader("Lion.png")
 			if leg.Airline != nil && leg.Airline.LogoURL != "" {
 				remoteB64, err := downloadImageToBase64(leg.Airline.LogoURL)
 				if err == nil && remoteB64 != "" {
@@ -511,39 +455,32 @@ func (s *bookingService) DownloadEticket(ctx context.Context, bookingCode string
 				}
 			}
 
-			// Hitung Durasi Terbang (Arrival - Departure)
 			durationMinutes := int(leg.ArrivalTime.Sub(leg.DepartureTime).Minutes())
 			durationStr := utils.FormatDuration(durationMinutes)
 
-			// Logic Transit (Cek apakah ada leg berikutnya)
 			var transitDetail pdfprinter.TransitDetail
 			if i < totalLegs-1 {
-				// Bukan leg terakhir, berarti TRANSIT
 				nextLeg := legs[i+1]
-				// Durasi Transit = Depature Next Leg - Arrival Current Leg
 				transitMinutes := int(nextLeg.DepartureTime.Sub(leg.ArrivalTime).Minutes())
 				
 				transitDetail = pdfprinter.TransitDetail{
 					IsTransit: true,
-					Location:  leg.DestinationAirport.CityName, // Transit di kota tujuan saat ini
+					Location:  leg.DestinationAirport.CityName,
 					Duration:  utils.FormatDuration(transitMinutes),
 				}
 			} else {
-				// Leg Terakhir -> TIDAK TRANSIT
 				transitDetail = pdfprinter.TransitDetail{IsTransit: false}
 			}
 
-			// Ambil Kelas Kursi (Dari Booking Details Penumpang Pertama)
 			seatClass := "Economy"
 			if len(booking.Details) > 0 {
 				seatClass = booking.Details[0].SeatClass
 			}
 
-			// Append Segment
 			segments = append(segments, pdfprinter.FlightSegment{
 				AirlineName:  leg.Airline.Name,
 				AirlineLogo:  airlineLogo,
-				FlightNumber: booking.Flight.FlightCode, // Gunakan Flight Code utama
+				FlightNumber: booking.Flight.FlightCode,
 				FlightClass:  seatClass,
 				
 				Departure: pdfprinter.FlightPoint{
@@ -566,7 +503,6 @@ func (s *bookingService) DownloadEticket(ctx context.Context, bookingCode string
 		}
 	}
 
-	// 5. MAPPING PASSENGER LIST
 	var passengers []pdfprinter.TicketPassenger
 	for i, detail := range booking.Details {
 		passengers = append(passengers, pdfprinter.TicketPassenger{
@@ -576,45 +512,37 @@ func (s *bookingService) DownloadEticket(ctx context.Context, bookingCode string
 		})
 	}
 
-	// 6. SUSUN DATA FINAL
 	ticketData := pdfprinter.TicketData{
 		HeaderImage: getHeader("eticket_header.png"), 
 		FooterImage: getHeader("eticket_footer.png"),
-		
 		BookingID:   booking.OrderID,
 		BookingCode: booking.BookingCode,
 		BookingDate: booking.CreatedAt.Format("02 Jan 2006, 15:04"),
 		BookerName:  booking.User.FullName,
 		QRCode:      qrCodeBase64,
-		
 		Segments:    segments,
 		Passengers:  passengers,
 	}
 
-	// 7. GENERATE PDF (SAMA PERSIS SEPERTI INVOICE)
 	tmpFileName := fmt.Sprintf("temp_ticket_%s_%d.pdf", bookingCode, time.Now().Unix())
 	tmpFilePath := filepath.Join(cwd, tmpFileName)
 
-	// Panggil Printer
 	err = pdfprinter.GeneratePDF("ticket.html", ticketData, tmpFilePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed generate pdf: %w", err)
 	}
 
-	// Baca File
 	pdfBytes, err := os.ReadFile(tmpFilePath)
 	if err != nil {
-		os.Remove(tmpFilePath) // Cleanup jika gagal baca
+		os.Remove(tmpFilePath)
 		return nil, fmt.Errorf("failed read pdf file: %w", err)
 	}
 
-	// Hapus File Temp
 	os.Remove(tmpFilePath)
 
 	return pdfBytes, nil
 }
 
-// Utils (Tetap Sama)
 func generateRandomString(n int) string {
 	const letterBytes = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	b := make([]byte, n)
@@ -676,7 +604,6 @@ func formatPaymentMethodName(code string) string {
 	case "credit_card":
 		return "Credit Card"
 	default:
-		// Fallback: ganti underscore dengan spasi dan uppercase
 		return strings.ToUpper(strings.ReplaceAll(code, "_", " "))
 	}
 }

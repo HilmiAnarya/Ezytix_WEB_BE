@@ -15,7 +15,7 @@ const (
 type BookingDetail struct {
 	ID uint `json:"id" gorm:"primaryKey;autoIncrement"`
 	BookingID uint `json:"booking_id" gorm:"not null"`
-	PassengerTitle string    `json:"passenger_title" gorm:"size:10;not null"` // tuan, nyonya, nona
+	PassengerTitle string    `json:"passenger_title" gorm:"size:10;not null"`
 	PassengerName  string    `json:"passenger_name" gorm:"size:255;not null"`
 	PassengerDOB   time.Time `json:"passenger_dob" gorm:"type:date;not null"`
 	PassengerType  string    `json:"passenger_type" gorm:"size:20;not null"`

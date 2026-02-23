@@ -31,8 +31,6 @@ func (h *FlightHandler) CreateFlight(c *fiber.Ctx) error {
 		})
 	}
 
-	// --- MAPPING KE DTO (CRUCIAL STEP) ---
-	// Kita ubah model mentah menjadi DTO yang punya duration_formatted
 	flightResponse := ToFlightResponse(*flightModel)
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
@@ -48,9 +46,7 @@ func (h *FlightHandler) GetAllFlights(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid query params"})
 	}
 
-	// Logic Branching: Search vs Get All
-	// Note: Sebaiknya logic pemisahan ini ada di Service, tapi kita ikuti strukturmu dulu.
-	var flights []models.Flight // Menggunakan alias dari import models
+	var flights []models.Flight
 	var err error
 
 	if req.OriginAirportID != 0 && req.DestinationAirportID != 0 && req.DepartureDate != "" {
@@ -65,14 +61,11 @@ func (h *FlightHandler) GetAllFlights(c *fiber.Ctx) error {
 		})
 	}
 
-	// --- MAPPING LIST KE DTO ---
-	// Loop data model dan convert satu per satu ke DTO
 	var flightResponses []FlightResponse
 	for _, f := range flights {
 		flightResponses = append(flightResponses, ToFlightResponse(f))
 	}
 
-	// Handle empty slice agar return "[]" bukan "null"
 	if flightResponses == nil {
 		flightResponses = []FlightResponse{}
 	}
@@ -98,7 +91,6 @@ func (h *FlightHandler) GetFlightByID(c *fiber.Ctx) error {
 		})
 	}
 
-	// --- MAPPING KE DTO ---
 	flightResponse := ToFlightResponse(*flightModel)
 
 	return c.JSON(fiber.Map{
@@ -129,7 +121,6 @@ func (h *FlightHandler) UpdateFlight(c *fiber.Ctx) error {
 		})
 	}
 
-	// --- MAPPING KE DTO ---
 	flightResponse := ToFlightResponse(*flightModel)
 
 	return c.JSON(fiber.Map{

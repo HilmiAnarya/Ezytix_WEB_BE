@@ -32,13 +32,12 @@ func (r *flightRepository) CreateFlight(flight *models.Flight) error {
 func (r *flightRepository) GetAllFlights() ([]models.Flight, error) {
 	var flights []models.Flight
 
-	// Kita perlu preload Airline (Master) untuk ditampilkan di list admin
 	err := r.db.
-		Preload("Airline").                 // Ambil Validating Carrier
+		Preload("Airline").           
 		Preload("OriginAirport").
 		Preload("DestinationAirport").
 		Preload("FlightClasses").
-		Order("created_at DESC").           // Best practice: urutkan dari terbaru
+		Order("created_at DESC").         
 		Find(&flights).Error
 
 	return flights, err
@@ -48,18 +47,13 @@ func (r *flightRepository) GetFlightByID(id uint) (*models.Flight, error) {
 	var flight models.Flight
 
 	err := r.db.
-		// 1. Info Utama
 		Preload("Airline").
 		Preload("OriginAirport").
 		Preload("DestinationAirport").
-		
-		// 2. Info Detail Legs (Nested Preload)
 		Preload("FlightLegs").
-		Preload("FlightLegs.Airline").          // PENTING: Logo maskapai per leg
-		Preload("FlightLegs.OriginAirport").    // PENTING: Nama bandara per leg
+		Preload("FlightLegs.Airline").      
+		Preload("FlightLegs.OriginAirport").  
 		Preload("FlightLegs.DestinationAirport"). 
-		
-		// 3. Info Harga
 		Preload("FlightClasses").
 		
 		First(&flight, id).Error

@@ -14,7 +14,6 @@ func NewAirlineHandler(service AirlineService) *AirlineHandler {
 	return &AirlineHandler{service}
 }
 
-// CreateAirline: Menambah maskapai baru
 func (h *AirlineHandler) CreateAirline(c *fiber.Ctx) error {
 	var req CreateAirlineRequest
 
@@ -37,7 +36,6 @@ func (h *AirlineHandler) CreateAirline(c *fiber.Ctx) error {
 	})
 }
 
-// GetAllAirlines: Mengambil daftar semua maskapai
 func (h *AirlineHandler) GetAllAirlines(c *fiber.Ctx) error {
 	airlines, err := h.service.GetAllAirlines()
 	if err != nil {
@@ -51,7 +49,6 @@ func (h *AirlineHandler) GetAllAirlines(c *fiber.Ctx) error {
 	})
 }
 
-// GetAirlineByID: Detail satu maskapai
 func (h *AirlineHandler) GetAirlineByID(c *fiber.Ctx) error {
 	idStr := c.Params("id")
 	id, err := strconv.Atoi(idStr)
@@ -73,7 +70,6 @@ func (h *AirlineHandler) GetAirlineByID(c *fiber.Ctx) error {
 	})
 }
 
-// UpdateAirline: Edit data maskapai
 func (h *AirlineHandler) UpdateAirline(c *fiber.Ctx) error {
 	idStr := c.Params("id")
 	id, err := strconv.Atoi(idStr)
@@ -103,7 +99,6 @@ func (h *AirlineHandler) UpdateAirline(c *fiber.Ctx) error {
 	})
 }
 
-// DeleteAirline: Hapus maskapai
 func (h *AirlineHandler) DeleteAirline(c *fiber.Ctx) error {
 	idStr := c.Params("id")
 	id, err := strconv.Atoi(idStr)

@@ -36,7 +36,6 @@ func NewMailService() MailService {
 }
 
 func (s *mailService) SendOTPEmail(toEmail string, name string, otpCode string) error {
-	// 1. Siapkan data dinamis untuk template
 	data := struct {
 		Name    string
 		OTPCode string
@@ -45,7 +44,6 @@ func (s *mailService) SendOTPEmail(toEmail string, name string, otpCode string) 
 		OTPCode: otpCode,
 	}
 
-	// 2. Parse Template HTML (Kita tulis inline saja biar praktis, tapi tetap cantik)
 	htmlTemplate := `
 	<!DOCTYPE html>
 	<html>
@@ -102,7 +100,6 @@ func (s *mailService) SendOTPEmail(toEmail string, name string, otpCode string) 
 		return fmt.Errorf("gagal execute template: %v", err)
 	}
 
-	// 3. Susun Pesan Gomail
 	m := gomail.NewMessage()
 	m.SetHeader("From", s.sender)
 	m.SetHeader("To", toEmail)

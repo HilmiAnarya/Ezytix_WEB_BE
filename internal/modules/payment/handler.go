@@ -14,7 +14,6 @@ func NewPaymentHandler(service PaymentService) *PaymentHandler {
 	return &PaymentHandler{service}
 }
 
-// POST /api/v1/payments/initiate
 func (h *PaymentHandler) InitiatePayment(c *fiber.Ctx) error {
 	var req InitiatePaymentRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -39,7 +38,6 @@ func (h *PaymentHandler) InitiatePayment(c *fiber.Ctx) error {
 	})
 }
 
-// POST /api/v1/payments/webhook
 func (h *PaymentHandler) HandleWebhook(c *fiber.Ctx) error {
 	var payload map[string]interface{}
 	if err := c.BodyParser(&payload); err != nil {
@@ -62,7 +60,6 @@ func (h *PaymentHandler) HandleWebhook(c *fiber.Ctx) error {
 	})
 }
 
-// POST /api/v1/payments/orders/:orderID/cancel
 func (h *PaymentHandler) CancelPayment(c *fiber.Ctx) error {
 	orderID := c.Params("orderID")
 	if orderID == "" {
@@ -85,7 +82,6 @@ func (h *PaymentHandler) CancelPayment(c *fiber.Ctx) error {
 	})
 }
 
-// [BARU] GET /api/v1/payments/orders/:orderID
 func (h *PaymentHandler) GetPaymentStatus(c *fiber.Ctx) error {
 	orderID := c.Params("orderID")
 	if orderID == "" {
@@ -98,7 +94,6 @@ func (h *PaymentHandler) GetPaymentStatus(c *fiber.Ctx) error {
 	resp, err := h.service.GetPaymentByOrderID(orderID)
 	if err != nil {
 		status := fiber.StatusInternalServerError
-		// Handle record not found case
 		if strings.Contains(err.Error(), "record not found") {
 			status = fiber.StatusNotFound
 		}

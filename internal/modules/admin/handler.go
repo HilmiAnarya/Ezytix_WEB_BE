@@ -14,7 +14,6 @@ func NewAdminHandler(service AdminService) *AdminHandler {
 }
 
 func (h *AdminHandler) GetDashboardStats(c *fiber.Ctx) error {
-	// (Opsional) Validasi Role Admin dari JWT Claims
 	claims := c.Locals("user").(*jwt.JWTClaims)
 	if claims.Role != "admin" {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{

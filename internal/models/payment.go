@@ -7,9 +7,8 @@ import (
 )
 
 const (
-	// Mapping Status Midtrans ke Internal App
 	PaymentStatusPending    = "pending"
-	PaymentStatusSettlement = "settlement" // Paid
+	PaymentStatusSettlement = "settlement"
 	PaymentStatusExpire     = "expire"
 	PaymentStatusDeny       = "deny"
 	PaymentStatusCancel     = "cancel"
@@ -18,26 +17,16 @@ const (
 type Payment struct {
 	ID                int             `json:"id" gorm:"primaryKey"`
 	OrderID           string          `json:"order_id" gorm:"index"`
-	
-	// [MIDTRANS CORE]
-	TransactionID     string          `json:"transaction_id" gorm:"index"` // UUID Midtrans
-	PaymentType       string          `json:"payment_type"`                // bank_transfer, echannel, qris, gopay
+	TransactionID     string          `json:"transaction_id" gorm:"index"`
+	PaymentType       string          `json:"payment_type"`              
 	GrossAmount       decimal.Decimal `json:"gross_amount" gorm:"type:numeric(15,2)"`
-	TransactionStatus string          `json:"transaction_status"`          // Status dari Midtrans
-
-	// [BANK TRANSFER] (BCA, BNI, BRI, Permata)
+	TransactionStatus string          `json:"transaction_status"`
 	Bank     string `json:"bank"`
 	VaNumber string `json:"va_number"`
-
-	// [MANDIRI BILL]
 	BillKey    string `json:"bill_key"`
 	BillerCode string `json:"biller_code"`
-
-	// [QRIS & E-WALLET]
-	QrUrl    string `json:"qr_url" gorm:"type:text"`   // URL Gambar QR
-	Deeplink string `json:"deeplink" gorm:"type:text"` // Link Redirect App
-
-	// [TIMESTAMPS]
+	QrUrl    string `json:"qr_url" gorm:"type:text"`
+	Deeplink string `json:"deeplink" gorm:"type:text"`
 	ExpiryTime *time.Time `json:"expiry_time"`
 	PaidAt     *time.Time `json:"paid_at"`
 	CreatedAt  time.Time  `json:"created_at"`

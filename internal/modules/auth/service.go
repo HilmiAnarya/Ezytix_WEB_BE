@@ -18,18 +18,16 @@ type AuthService interface {
 	Register(req RegisterRequest) (*models.User, error)
 	Login(req LoginRequest) (*LoginResponse, string, string, error)
 	Refresh(refreshToken string) (*LoginResponse, string, string, error)
-	GetUserByID(id uint) (*models.User, error) // NEW
+	GetUserByID(id uint) (*models.User, error)
     ChangePassword(userID uint, req ChangePasswordRequest) error
     UpdateProfile(userID uint, req UpdateProfileRequest) (*models.User, error)
-
-	// [BARU] Interface OTP
 	VerifyOTP(req VerifyOTPRequest) (*LoginResponse, string, string, error)
 	ResendOTP(req ResendOTPRequest) error
 }
 
 type authService struct {
 	repo AuthRepository
-	mail mail.MailService // [BARU] Tambahkan properti ini
+	mail mail.MailService
 }
 
 func NewAuthService(repo AuthRepository, mailService mail.MailService) AuthService {
@@ -39,7 +37,6 @@ func NewAuthService(repo AuthRepository, mailService mail.MailService) AuthServi
 	}
 }
 
-// Helper Generator OTP 6 Digit
 func generateOTPCode() string {
 	const charset = "0123456789"
 	b := make([]byte, 6)
@@ -51,7 +48,6 @@ func generateOTPCode() string {
 }
 
 func (s *authService) Register(req RegisterRequest) (*models.User, error) {
-    // Validasi dasar (Tetap sama seperti aslimu)
 	if req.FullName == "" || req.Username == "" || req.Email == "" || req.Phone == "" || req.Password == "" {
 		return nil, errors.New("semua field harus diisi")
 	}
@@ -88,16 +84,13 @@ func (s *authService) Register(req RegisterRequest) (*models.User, error) {
 		Phone:      req.Phone,
 		Password:   hashed,
 		Role:       models.RoleCustomer,
-		IsVerified: false, // Default belum verifikasi
+		IsVerified: false,
 	}
 
 	if err := s.repo.CreateUser(user); err != nil {
 		return nil, err
 	}
 
-	// ==========================================
-	// [BARU] LOGIC CREATE & SEND OTP SETELAH REGISTER
-	// ==========================================
 	otpCode := generateOTPCode()
 	otpData := &models.UserOTP{
 		UserID:    user.ID,
@@ -109,7 +102,6 @@ func (s *authService) Register(req RegisterRequest) (*models.User, error) {
 		return nil, fmt.Errorf("berhasil register tapi gagal membuat OTP: %v", err)
 	}
 
-	// Kirim via Email (Berjalan asinkron agar response tidak lambat)
 	go s.mail.SendOTPEmail(user.Email, user.FullName, otpCode)
 
 	return user, nil
@@ -155,9 +147,6 @@ func (s *authService) Login(req LoginRequest) (*LoginResponse, string, string, e
     }, access, refresh, nil
 }
 
-// ==========================================
-// [BARU] FUNGSI VERIFY OTP
-// ==========================================
 func (s *authService) VerifyOTP(req VerifyOTPRequest) (*LoginResponse, string, string, error) {
 	user, err := s.repo.FindByEmail(req.Email)
 	if err != nil || user == nil {
@@ -181,24 +170,17 @@ func (s *authService) VerifyOTP(req VerifyOTPRequest) (*LoginResponse, string, s
 		return nil, "", "", errors.New("kode OTP sudah kadaluarsa. silakan minta kirim ulang")
 	}
 
-	// Validasi Sukses: Ubah is_verified jadi true & hapus OTP
 	user.IsVerified = true
 	if err := s.repo.UpdateUser(user); err != nil {
 		return nil, "", "", errors.New("gagal memverifikasi akun")
 	}
-	s.repo.DeleteOTP(user.ID) // Hapus OTP bekas
-
-	// Langsung Buatkan Token Login
+	s.repo.DeleteOTP(user.ID)
 	access, _ := jwt.CreateAccessToken(user.ID, string(user.Role), user.Email, user.Phone)
 	refresh, _ := jwt.CreateRefreshToken(user.ID)
 
 	return &LoginResponse{User: user}, access, refresh, nil
 }
 
-
-// ==========================================
-// [BARU] FUNGSI RESEND OTP
-// ==========================================
 func (s *authService) ResendOTP(req ResendOTPRequest) error {
 	user, err := s.repo.FindByEmail(req.Email)
 	if err != nil || user == nil {
@@ -209,7 +191,6 @@ func (s *authService) ResendOTP(req ResendOTPRequest) error {
 		return errors.New("akun ini sudah terverifikasi")
 	}
 
-	// Generate OTP Baru & Geser expired 5 menit lagi
 	newOTP := generateOTPCode()
 	otpData := &models.UserOTP{
 		UserID:    user.ID,
@@ -221,7 +202,6 @@ func (s *authService) ResendOTP(req ResendOTPRequest) error {
 		return errors.New("gagal membuat OTP baru")
 	}
 
-	// Kirim Email
 	go s.mail.SendOTPEmail(user.Email, user.FullName, newOTP)
 
 	return nil
@@ -295,13 +275,11 @@ func (s *authService) ChangePassword(userID uint, req ChangePasswordRequest) err
 }
 
 func (s *authService) UpdateProfile(userID uint, req UpdateProfileRequest) (*models.User, error) {
-	// 1. Ambil user saat ini
 	user, err := s.repo.FindByID(userID)
 	if err != nil {
 		return nil, errors.New("user tidak ditemukan")
 	}
 
-	// 2. Validasi Username jika berubah
 	if req.Username != user.Username {
 		existingUser, _ := s.repo.FindByUsername(req.Username)
 		if existingUser != nil {
@@ -309,7 +287,6 @@ func (s *authService) UpdateProfile(userID uint, req UpdateProfileRequest) (*mod
 		}
 	}
 
-	// 3. Validasi Email jika berubah
 	if req.Email != user.Email {
 		existingEmail, _ := s.repo.FindByEmail(req.Email)
 		if existingEmail != nil {
@@ -317,7 +294,6 @@ func (s *authService) UpdateProfile(userID uint, req UpdateProfileRequest) (*mod
 		}
 	}
 
-	// 4. Validasi Phone jika berubah
 	if req.Phone != user.Phone {
 		existingPhone, _ := s.repo.FindByPhone(req.Phone)
 		if existingPhone != nil {
@@ -325,13 +301,11 @@ func (s *authService) UpdateProfile(userID uint, req UpdateProfileRequest) (*mod
 		}
 	}
 
-	// 5. Terapkan perubahan
 	user.FullName = req.FullName
 	user.Username = req.Username
 	user.Email = req.Email
 	user.Phone = req.Phone
 
-	// 6. Simpan ke database
 	if err := s.repo.UpdateUser(user); err != nil {
 		return nil, errors.New("gagal memperbarui profil")
 	}

@@ -5,7 +5,7 @@ import (
 	"gorm.io/gorm"
 
 	jwt "ezytix-be/pkg/jwt"
-	"ezytix-be/pkg/mail" // [BARU] Import mail
+	"ezytix-be/pkg/mail"
 )
 
 type AuthHandler struct {
@@ -22,14 +22,12 @@ func NewAuthHandler(db *gorm.DB) *AuthHandler {
 func (h *AuthHandler) Register(c *fiber.Ctx) error {
 	var req RegisterRequest
 
-	// Parse JSON request
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": "invalid request body",
 		})
 	}
 
-	// Register logic
 	user, err := h.service.Register(req)
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -37,7 +35,6 @@ func (h *AuthHandler) Register(c *fiber.Ctx) error {
 		})
 	}
 
-	// Response
 	return c.JSON(fiber.Map{
 		"message": "register success",
 		"user":    user,
@@ -56,7 +53,6 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 		return c.Status(401).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	// SET ACCESS TOKEN (HttpOnly)
 	c.Cookie(&fiber.Cookie{
 		Name:     "access_token",
 		Value:    access,
@@ -66,14 +62,13 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 		MaxAge:   60 * 15,
 	})
 
-	// SET REFRESH TOKEN (HttpOnly)
 	c.Cookie(&fiber.Cookie{
 		Name:     "refresh_token",
 		Value:    refresh,
 		HTTPOnly: true,
 		SameSite: "Strict",
 		Path:     "/",
-		MaxAge:   60 * 60 * 24 * 7, // 7 days
+		MaxAge:   60 * 60 * 24 * 7, 
 	})
 
 	return c.JSON(fiber.Map{
@@ -94,7 +89,6 @@ func (h *AuthHandler) Refresh(c *fiber.Ctx) error {
 		return c.Status(401).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	// SET NEW TOKENS
 	c.Cookie(&fiber.Cookie{
 		Name:     "access_token",
 		Value:    access,
@@ -133,9 +127,6 @@ func (h *AuthHandler) Me(c *fiber.Ctx) error {
     return c.JSON(user)
 }
 
-// ==========================================
-// [BARU] HANDLER VERIFY OTP
-// ==========================================
 func (h *AuthHandler) VerifyOTP(c *fiber.Ctx) error {
 	var req VerifyOTPRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -147,7 +138,6 @@ func (h *AuthHandler) VerifyOTP(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	// Set Cookie persis seperti fungsi Login
 	c.Cookie(&fiber.Cookie{
 		Name:     "access_token",
 		Value:    access,
@@ -171,9 +161,6 @@ func (h *AuthHandler) VerifyOTP(c *fiber.Ctx) error {
 	})
 }
 
-// ==========================================
-// [BARU] HANDLER RESEND OTP
-// ==========================================
 func (h *AuthHandler) ResendOTP(c *fiber.Ctx) error {
 	var req ResendOTPRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -203,7 +190,6 @@ func (h *AuthHandler) ChangePassword(c *fiber.Ctx) error {
         return c.Status(400).JSON(fiber.Map{"error": "invalid request"})
     }
 
-    // Ambil user ID dari JWT (middleware sudah set)
     claims := c.Locals("user").(*jwt.JWTClaims)
     userID := claims.UserID
 
@@ -211,7 +197,6 @@ func (h *AuthHandler) ChangePassword(c *fiber.Ctx) error {
         return c.Status(400).JSON(fiber.Map{"error": err.Error()})
     }
 
-    // Auto logout (frontend redirect)
     c.Cookie(&fiber.Cookie{Name: "access_token", Value: "", MaxAge: -1, Path: "/"})
     c.Cookie(&fiber.Cookie{Name: "refresh_token", Value: "", MaxAge: -1, Path: "/"})
 
@@ -223,22 +208,17 @@ func (h *AuthHandler) ChangePassword(c *fiber.Ctx) error {
 func (h *AuthHandler) UpdateProfile(c *fiber.Ctx) error {
 	var req UpdateProfileRequest
 
-	// Parse JSON
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": "invalid request body",
 		})
 	}
 
-	// Ambil userID dari JWT claims
 	claims := c.Locals("user").(*jwt.JWTClaims)
 	userID := claims.UserID
 
-	// Panggil service
 	updatedUser, err := h.service.UpdateProfile(userID, req)
 	if err != nil {
-		// Jika error karena conflict data (email/username kepake) -> 409 Conflict
-		// Bisa disesuaikan jadi 400 Bad Request jika mau
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": err.Error(),
 		})

@@ -17,10 +17,7 @@ type User struct {
 	Phone     string    `json:"phone" gorm:"size:20;uniqueIndex;not null"`
 	Password  string    `json:"-" gorm:"size:255;not null"`
 	Role      UserRole  `json:"role" gorm:"type:enum('customer','admin');default:'customer'"`
-
-	// [BARU] Tambahkan properti ini
 	IsVerified bool       `json:"is_verified" gorm:"default:false"`
-	
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
 	DeletedAt *time.Time `json:"-" gorm:"index"`

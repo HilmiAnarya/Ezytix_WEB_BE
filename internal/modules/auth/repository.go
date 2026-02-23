@@ -11,16 +11,11 @@ type AuthRepository interface {
 	FindByEmail(email string) (*models.User, error)
 	FindByPhone(phone string) (*models.User, error)
 	FindByUsername(username string) (*models.User, error)
-
 	FindByEmailOrPhone(identifier string) (*models.User, error)
-
 	FindByID(id uint) (*models.User, error)
-
 	CreateUser(user *models.User) error
 	UpdatePassword(userID uint, hashedPassword string) error
 	UpdateUser(user *models.User) error
-
-	// [BARU] Fungsi Khusus OTP
 	CreateOrUpdateOTP(otp *models.UserOTP) error
 	FindOTPByUserID(userID uint) (*models.UserOTP, error)
 	DeleteOTP(userID uint) error
@@ -107,7 +102,6 @@ func (r *authRepository) UpdateUser(user *models.User) error {
 }
 
 func (r *authRepository) CreateOrUpdateOTP(otp *models.UserOTP) error {
-	// Jika user sudah punya OTP sebelumnya, timpa (update). Jika belum, buat baru (create).
 	var existing models.UserOTP
 	err := r.db.Where("user_id = ?", otp.UserID).First(&existing).Error
 	if err == nil {

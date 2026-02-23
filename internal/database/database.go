@@ -43,7 +43,6 @@ func New() Service {
 		log.Fatal("Failed to ping DB:", err)
 	}
 
-	// Pool configuration
 	db.SetMaxOpenConns(25)
 	db.SetMaxIdleConns(25)
 	db.SetConnMaxLifetime(5 * time.Minute)

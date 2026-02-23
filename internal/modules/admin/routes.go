@@ -14,10 +14,7 @@ func AdminRegisterRoutes(app *fiber.App, db *gorm.DB) {
 
 	adminGroup := app.Group("/api/v1/admin")
 
-	// Middleware: Wajib Login
 	adminGroup.Use(middleware.JWTMiddleware)
 	adminGroup.Use(middleware.RequireRole("admin"))
-
-	// Endpoint Statistik
 	adminGroup.Get("/dashboard/stats", handler.GetDashboardStats)
 }

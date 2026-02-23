@@ -15,11 +15,7 @@ func NewBookingHandler(service BookingService) *BookingHandler {
 	return &BookingHandler{service}
 }
 
-// ==========================================
-// 1. CREATE ORDER HANDLER
-// ==========================================
 func (h *BookingHandler) CreateOrder(c *fiber.Ctx) error {
-	// 1. Safe JWT Extraction (Mencegah Panic)
 	userClaims, ok := c.Locals("user").(*jwt.JWTClaims)
 	if !ok || userClaims == nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
@@ -27,9 +23,9 @@ func (h *BookingHandler) CreateOrder(c *fiber.Ctx) error {
 			"message": "Unauthorized: Invalid token claims",
 		})
 	}
+
 	userID := userClaims.UserID
 
-	// 2. Parsing Request Body
 	var req CreateOrderRequest
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -39,10 +35,8 @@ func (h *BookingHandler) CreateOrder(c *fiber.Ctx) error {
 		})
 	}
 
-	// 3. Panggil Service
 	resp, err := h.service.CreateOrder(userID, req)
 	if err != nil {
-		// General Error (bisa di-improve dengan mapping error type)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"status":  "error",
 			"message": "failed to create order",
@@ -50,7 +44,6 @@ func (h *BookingHandler) CreateOrder(c *fiber.Ctx) error {
 		})
 	}
 
-	// 4. Return Success
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 		"status":  "success",
 		"message": "order created successfully",
@@ -58,11 +51,7 @@ func (h *BookingHandler) CreateOrder(c *fiber.Ctx) error {
 	})
 }
 
-// ==========================================
-// 2. GET HISTORY HANDLER
-// ==========================================
 func (h *BookingHandler) GetMyBookings(c *fiber.Ctx) error {
-	// 1. Safe JWT Extraction
 	userClaims, ok := c.Locals("user").(*jwt.JWTClaims)
 	if !ok || userClaims == nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
@@ -70,9 +59,9 @@ func (h *BookingHandler) GetMyBookings(c *fiber.Ctx) error {
 			"message": "Unauthorized: Invalid token claims",
 		})
 	}
+
 	userID := userClaims.UserID
 
-	// 2. Panggil Service (Sudah return DTO dengan ExpiryTime yang benar)
 	bookings, err := h.service.GetUserBookings(userID)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -82,7 +71,6 @@ func (h *BookingHandler) GetMyBookings(c *fiber.Ctx) error {
 		})
 	}
 
-	// 3. Return Success
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"status":  "success",
 		"message": "successfully fetched booking history",
@@ -90,11 +78,7 @@ func (h *BookingHandler) GetMyBookings(c *fiber.Ctx) error {
 	})
 }
 
-// ==========================================
-// 3. DOWNLOAD INVOICE HANDLER (NEW)
-// ==========================================
 func (h *BookingHandler) DownloadInvoice(c *fiber.Ctx) error {
-    // UBAH DISINI: Ambil order_id
     orderID := c.Params("order_id")
     if orderID == "" {
         return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -103,7 +87,6 @@ func (h *BookingHandler) DownloadInvoice(c *fiber.Ctx) error {
         })
     }
 
-    // Panggil Service dengan Order ID
     pdfBytes, err := h.service.DownloadInvoice(c.Context(), orderID)
     if err != nil {
         return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -114,13 +97,11 @@ func (h *BookingHandler) DownloadInvoice(c *fiber.Ctx) error {
     }
 
     c.Set("Content-Type", "application/pdf")
-    // Nama file jadi Invoice-ORDERID.pdf
     c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=Invoice-%s.pdf", orderID))
 
     return c.Send(pdfBytes)
 }
 
-// Tambahkan Method ini
 func (h *BookingHandler) DownloadEticket(c *fiber.Ctx) error {
 	bookingCode := c.Params("booking_code")
 	if bookingCode == "" {

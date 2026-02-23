@@ -6,10 +6,6 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-// ==========================================
-// REQUEST (INPUT) - TIDAK BERUBAH
-// ==========================================
-
 type PassengerRequest struct {
 	Title          string `json:"title" validate:"required,oneof=tuan nyonya nona mr ms mrs"`
 	FullName       string `json:"full_name" validate:"required,min=2"`
@@ -30,10 +26,6 @@ type CreateOrderRequest struct {
 	Items []BookingItemRequest `json:"items" validate:"required,min=1,dive"`
 }
 
-// ==========================================
-// RESPONSE (OUTPUT) - UPDATED 🚀
-// ==========================================
-
 type BookingDetailResponse struct {
 	BookingCode     string          `json:"booking_code"`
 	FlightCode      string          `json:"flight_code"`
@@ -52,16 +44,13 @@ type BookingResponse struct {
 	ExpiryTime      *time.Time              `json:"expiry_time,omitempty"`
 	Bookings        []BookingDetailResponse `json:"bookings"`
 }
-
-// [NEW] Struct untuk Detail Penumpang di History
 type PassengerDetailResponse struct {
 	FullName      string `json:"full_name"`
-	Type          string `json:"type"`           // adult, child, infant
-	TicketNumber  string `json:"ticket_number"`  // Nomor Tiket
+	Type          string `json:"type"`           
+	TicketNumber  string `json:"ticket_number"` 
 	SeatClass     string `json:"seat_class"`
 }
 
-// [UPDATED] Response History
 type MyBookingResponse struct {
 	OrderID     string          `json:"order_id"`
 	BookingCode string          `json:"booking_code"`
@@ -69,14 +58,10 @@ type MyBookingResponse struct {
 	TotalAmount decimal.Decimal `json:"total_amount"`
 	CreatedAt   time.Time       `json:"created_at"`
 	ExpiryTime  *time.Time      `json:"expiry_time,omitempty"`
-
 	Flight     BookingFlightDetail       `json:"flight"`
-	
-	// [NEW] List Penumpang
 	Passengers []PassengerDetailResponse `json:"passengers"` 
 }
 
-// [UPDATED] Detail Penerbangan
 type BookingFlightDetail struct {
 	FlightCode      string    `json:"flight_code"`
 	AirlineName     string    `json:"airline_name"`
@@ -85,13 +70,9 @@ type BookingFlightDetail struct {
 	Destination     string    `json:"destination"`
 	DepartureTime   time.Time `json:"departure_time"`
 	ArrivalTime     time.Time `json:"arrival_time"`
-	
 	DurationMinutes int       `json:"duration_minutes"`
-	
-	// [NEW] Fields untuk mendukung UI baru
 	DurationFormatted string  `json:"duration_formatted"` 
 	TransitInfo       string  `json:"transit_info"`
-	
 	SeatClass       string    `json:"seat_class"`
 	ClassCode       string    `json:"class_code"`
 }

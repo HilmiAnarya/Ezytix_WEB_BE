@@ -2,7 +2,6 @@ package airline
 
 import "time"
 
-// Request untuk Create/Update
 type CreateAirlineRequest struct {
 	IATA    string `json:"iata" validate:"required,len=2,uppercase"` // Validasi kode IATA 2 huruf
 	Name    string `json:"name" validate:"required,min=3"`
@@ -14,8 +13,6 @@ type UpdateAirlineRequest struct {
 	LogoURL string `json:"logo_url,omitempty" validate:"omitempty,url"`
 	IATA    string `json:"iata" validate:"required,len=2,uppercase"`
 }
-
-// Response (Single Object)
 type AirlineResponse struct {
 	ID        uint      `json:"id"`
 	IATA      string    `json:"iata"`
@@ -23,8 +20,6 @@ type AirlineResponse struct {
 	LogoURL   string    `json:"logo_url"`
 	CreatedAt time.Time `json:"created_at"`
 }
-
-// Response (Simple/Minimalist untuk embedding di Flight)
 type AirlineSimpleResponse struct {
 	ID      uint   `json:"id"`
 	IATA    string `json:"iata"`
